@@ -51,7 +51,7 @@ def run_benchmark(experiment_name):
 
     for i in range(5):
         print(f"Iteration {i}")
-        for noise in [0, 0.1, 0.5, 1]:
+        for noise in [5]:
             print(f"\tNoise = {noise}")
             X, y = make_regression(
                 n_samples=8000,
