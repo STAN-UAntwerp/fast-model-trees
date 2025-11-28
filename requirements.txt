@@ -1,5 +1,5 @@
-numba==0.55.1
-numpy==1.21.2
+numba==0.62.1
+numpy==1.22.0
 pandas==1.4.1
 ucimlrepo
 xgboost
@@ -7,6 +7,5 @@ scikit-learn
 networkx==3.4.1
 matplotlib==3.8
 retry 
-tbb
 dataframe_image
 click
