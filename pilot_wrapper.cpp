@@ -67,6 +67,11 @@ public:
         return carma::mat_to_arr(tree);
     }
 
+    py::array_t<double> feature_importances() const {
+        arma::vec importance = pilot.getFeatureImportance();
+        return vec_to_numpy(importance);
+    }
+
 private:
     PILOT pilot;
 };
@@ -85,5 +90,6 @@ PYBIND11_MODULE(cpilot, m) {
                       double>()) //precScale
         .def("train", &PyPILOT::train)
         .def("predict", &PyPILOT::predict)
-        .def("print", &PyPILOT::print);
+        .def("print", &PyPILOT::print)
+        .def("feature_importances", &PyPILOT::feature_importances);
 }

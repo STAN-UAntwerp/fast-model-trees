@@ -23,6 +23,11 @@ class CPILOTWrapper(CPILOT):
     ):
         if max_features == -1:
             raise ValueError("max_features must be set")
+
+        # Use default df_settings if None provided
+        if df_settings is None:
+            df_settings = list(DEFAULT_DF_SETTINGS.values())
+
         super().__init__(
             df_settings,
             min_sample_leaf,
@@ -54,6 +59,7 @@ class CPILOTWrapper(CPILOT):
                 "slope_left",
                 "intercept_right",
                 "slope_right",
+                "rss_reduction",
             ],
         )
 
@@ -66,6 +72,19 @@ class CPILOTWrapper(CPILOT):
             df["feature_name"] = df["feature_index"].map(dict(enumerate(feature_names)))
 
         return df
+
+    @property
+    def feature_importances_(self):
+        """Get feature importances for this tree.
+
+        Returns normalized RSS reduction per feature (summing to 1.0).
+        Follows sklearn's approach of normalizing per-tree importances.
+        """
+        raw_importance = super().feature_importances()
+        total = raw_importance.sum()
+        if total > 0:
+            return raw_importance / total
+        return raw_importance
 
 
 class RandomForestCPilot(BaseEstimator):
@@ -206,6 +225,58 @@ class RandomForestCPilot(BaseEstimator):
         if individual:
             return predictions
         return predictions.mean(axis=1)
+
+    @property
+    def feature_importances_(self):
+        """Compute average feature importance across all trees in the forest.
+
+        Feature importance is calculated as the normalized RSS reduction per tree,
+        averaged across all trees, then re-normalized. This follows sklearn's approach:
+        1. Each tree's importances are normalized (sum to 1.0)
+        2. Importances are averaged across trees
+        3. Final result is re-normalized (sum to 1.0)
+
+        Features not selected in a particular tree contribute 0 to that tree's importance.
+
+        Returns:
+            np.ndarray: Array of shape (n_features,) with normalized feature importances
+                       summing to 1.0.
+        """
+        if not hasattr(self, 'estimators') or len(self.estimators) == 0:
+            raise ValueError("Model must be fitted before accessing feature_importances_")
+
+        # Get the number of features from the first estimator
+        n_features_total = len(self.estimators[0].feature_idx) if hasattr(self.estimators[0], 'feature_idx') else 0
+
+        if n_features_total == 0:
+            # Fallback: check from fitted data
+            raise ValueError("Cannot determine number of features")
+
+        # We need to know the total number of features in the original space
+        # This is the max feature index across all trees + 1
+        max_feature_idx = max(max(e.feature_idx) for e in self.estimators)
+        n_features = max_feature_idx + 1
+
+        # Initialize total importance array
+        total_importance = np.zeros(n_features)
+
+        # Aggregate normalized importance from each tree
+        # Note: estimator.feature_importances_ already returns normalized values (sum to 1.0)
+        for estimator in self.estimators:
+            tree_importance = estimator.feature_importances_
+            # Map the tree's feature importances back to the full feature space
+            for local_idx, global_idx in enumerate(estimator.feature_idx):
+                if local_idx < len(tree_importance):
+                    total_importance[global_idx] += tree_importance[local_idx]
+
+        # Average across trees
+        avg_importance = total_importance / len(self.estimators)
+
+        # Re-normalize to sum to 1.0 (sklearn's approach)
+        total = avg_importance.sum()
+        if total > 0:
+            return avg_importance / total
+        return avg_importance
 
 
 def _fit_single_estimator(estimator, X: np.ndarray, y: np.ndarray, categorical_idx: np.ndarray):

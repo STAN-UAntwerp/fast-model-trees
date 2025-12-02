@@ -4,10 +4,19 @@ This repository also includes the implementation for RaFFLE, a random forest of 
 Raymaekers, J., Rousseeuw, P. J., Servotte, T., Verdonck, T., & Yao, R. (2025). A Powerful Random Forest Featuring Linear Extensions (RaFFLE). _Under Review_
 
 ### Requirements:
-Requirements can be installed by running
+
+This project uses [uv](https://github.com/astral-sh/uv) for Python environment management. First, install uv if you haven't already:
 ```
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+Then install the project dependencies:
+```
+uv sync
+```
+
+This will create a virtual environment and install all required dependencies from `pyproject.toml`.
+
 The RaFFLE implementation uses a c++ version of pilot for computational speed.
 To build the c++ wrapper, follow these steps.
 
@@ -32,17 +41,12 @@ To build the c++ wrapper, follow these steps.
     ```
 
 3.  Install pybind and add to cmake config
+
+    If you used `uv sync` as described in the Requirements section, `pybind11` is already installed. You need to tell cmake where to find the `pybind11` cmake files. Add the following line to your `CMakeLists.txt` *before* the `find_package(pybind11 REQUIRED)` line:
+    ```cmake
+    set(pybind11_DIR <path-to-your-venv>/lib/python3.10/site-packages/pybind11/share/cmake/pybind11)
     ```
-    pip install pybind11
-    ```
-    Locate the cmake config:
-    ```
-    pip show pybind11
-    ```
-    copy the installation path to `CMakeLists.txt`:
-    ```
-    set(pybind11_DIR <path>/pybind11/share/cmake/pybind11)
-    ```
+    If using uv, your venv is located at `.venv/` in the project root.
 
 4.  Install carma
     Clone the repo: `git@github.com:RUrlus/carma.git`
@@ -77,15 +81,11 @@ To build the c++ wrapper, follow these steps.
     ```
 
 3.  **pybind11:**
-    Install `pybind11` using pip:
-    ```
-    pip install pybind11
-    ```
-    Then, you need to tell cmake where to find the `pybind11` cmake files. Add the following line to your `CMakeLists.txt` *before* the `find_package(pybind11 REQUIRED)` line:
+    If you used `uv sync` as described in the Requirements section, `pybind11` is already installed. You need to tell cmake where to find the `pybind11` cmake files. Add the following line to your `CMakeLists.txt` *before* the `find_package(pybind11 REQUIRED)` line:
     ```cmake
     set(pybind11_DIR <path-to-your-venv>/lib/python3.10/site-packages/pybind11/share/cmake/pybind11)
     ```
-    You can find the path to your virtual environment's `site-packages` by running `python -m site --user-site`.
+    If using uv, your venv is located at `.venv/` in the project root.
 
 4.  **carma:**
     Clone the `carma` repository and build it from source. Note that the last command might require `sudo`.
@@ -139,24 +139,73 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 ### Example
 You can run an example for RaFFLE with the [raffle_example.py](raffle_example.py) script.
 
+### Feature Importance
+
+Both individual PILOT trees and RaFFLE (Random Forest of PILOT trees) support feature importance extraction, following the scikit-learn RandomForest approach.
+
+Feature importance is calculated as the normalized RSS (Residual Sum of Squares) reduction attributed to each feature across all splits in the tree. For random forests, each tree's normalized importances are averaged and then re-normalized, ensuring equal contribution from each tree regardless of its RSS scale.
+
+#### Usage
+
+For a single PILOT tree:
+```python
+from pilot.c_ensemble import CPILOTWrapper
+import numpy as np
+
+# Train a tree
+tree = CPILOTWrapper(
+    feature_idx=np.arange(n_features),
+    max_features=n_features,
+    max_depth=5,
+    min_sample_leaf=5
+)
+tree.train(X, y, categorical_idx)
+
+# Get feature importances
+importances = tree.feature_importances_
+```
+
+For a RaFFLE random forest:
+```python
+from pilot.c_ensemble import RandomForestCPilot
+
+# Train a random forest
+rf = RandomForestCPilot(
+    n_estimators=100,
+    max_depth=5,
+    random_state=42
+)
+rf.fit(X, y)
+
+# Get feature importances (averaged across all trees)
+importances = rf.feature_importances_
+```
+
+Feature importances are returned as a numpy array with shape `(n_features,)`, where each value represents the normalized importance of that feature (importances sum to 1.0). Higher values indicate more important features.
+
+You can test the feature importance implementation by running:
+```bash
+uv run python test_feature_importance.py
+```
+
 ### RaFFLE benchmark
 To run the same benchmark as described in the RaFFLE paper, you first need to download all the benchmark datasets using the [download_data.py](download_data.py) script.
 
-```
-python download_data.py
+```bash
+uv run python download_data.py
 ```
 
 Next you can run benchmark by running the [benchmark.py](benchmark.py) script:
-```
-python benchmark.py
+```bash
+uv run python benchmark.py
 ```
 
 Results will be stored in the `Output` folder.
 
 The plots from the paper are created with the [paperplots.py](paperplots.py) script. You can create all plots by running:
 
-```
-python paperplots.py --all
+```bash
+uv run python paperplots.py --all
 ```
 
 ### Local Modifications

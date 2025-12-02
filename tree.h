@@ -35,6 +35,7 @@ public:
   arma::uword predId; // feature id used for splitting or model
   arma::uword type; // node type 0/1/2/3/4/5 for con/lin/pcon/blin/plin/pconc
   double rss;
+  double rss_reduction; // RSS reduction achieved at this node
   double splitVal; // value of that feature at splitpoint
   double intL;
   double slopeL;
@@ -76,6 +77,7 @@ public:
   arma::colvec predict(const arma::mat& X) const;
   arma::mat print() const;
   arma::vec getResiduals() const;
+  arma::vec getFeatureImportance() const;
   
 protected:
   // protected methods
@@ -108,8 +110,9 @@ protected:
   double upperBound;
  
   std::unique_ptr<node> root;
-  arma::vec res; // contains the residuals 
+  arma::vec res; // contains the residuals
   arma::uvec nbNodesPerModelDepth; // count number of existing nodes per model depth
+  arma::vec featureImportance; // RSS reduction per feature (total across all splits)
 };
 
 #endif

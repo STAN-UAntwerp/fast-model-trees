@@ -75,12 +75,20 @@ void PILOT::train(const arma::mat &X,
   nbNodesPerModelDepth = arma::zeros<arma::uvec>(maxModelDepth + 1); // initialize nodes per model depth
   nbNodesPerModelDepth(0) = 1;                                       // 1 root node at depth 0
 
+  // initialize feature importance
+  featureImportance = arma::zeros<arma::vec>(X.n_cols);
+
   PILOT::growTree(root.get(), y, X, Xrank, catIds);
 }
 
 arma::vec PILOT::getResiduals() const
 {
   return (res);
+}
+
+arma::vec PILOT::getFeatureImportance() const
+{
+  return (featureImportance);
 }
 
 arma::mat PILOT::print() const
@@ -97,10 +105,11 @@ arma::mat PILOT::print() const
   // 8th column: slope left
   // 9th column: int right
   // 10th column: slope right
+  // 11th column: rss reduction
   // first the left node row is added, then right node
   // could also add modelID which increments for lin nodes as well.
 
-  arma::mat tr(0, 10);
+  arma::mat tr(0, 11);
   if (root != nullptr)
   { // check if tree has been constructed
     node *nd = root.get();
@@ -122,7 +131,8 @@ void PILOT::printNode(node *nd, arma::mat &tr) const
                       (double)nd->intL,
                       (double)nd->slopeL,
                       (double)nd->intR,
-                      (double)nd->slopeR};
+                      (double)nd->slopeR,
+                      (double)nd->rss_reduction};
   if (nd->type == 0)
   {
     vec(4) = arma::datum::nan;
@@ -177,6 +187,7 @@ void PILOT::growTree(node *nd,
     nd->slopeR = arma::datum::nan;
     nd->rangeL = arma::datum::nan;
     nd->rangeR = arma::datum::nan;
+    nd->rss_reduction = 0.0; // leaf nodes have no RSS reduction
     res(nd->obsIds) -= nd->intL; // subtract mean
     nd->rss = arma::sum(arma::square(res(nd->obsIds)));
     // set type to con, and no new call to growtree
@@ -184,6 +195,9 @@ void PILOT::growTree(node *nd,
   }
   else
   {
+    // Calculate RSS before split
+    double rss_before = arma::sum(arma::square(res(nd->obsIds)));
+
     bestSplitOut newSplit = findBestSplit(nd->obsIds,
                                           X,
                                           Xrank,
@@ -200,6 +214,16 @@ void PILOT::growTree(node *nd,
     nd->rangeL = newSplit.best_rangeL;
     nd->rangeR = newSplit.best_rangeR;
     nd->pivot_c = newSplit.best_pivot_c;
+
+    // Track feature importance: RSS reduction for splits and linear models
+    // Only track if a feature is actually used (type != 0 means not a constant node)
+    if (newSplit.best_type > 0 && !std::isnan(newSplit.best_feature)) {
+      double rss_reduction = rss_before - newSplit.best_rss;
+      nd->rss_reduction = rss_reduction;
+      featureImportance(newSplit.best_feature) += rss_reduction;
+    } else {
+      nd->rss_reduction = 0.0;
+    }
 
     /// update residuals and depth + continue growing
     if (newSplit.best_type == 0)
@@ -236,6 +260,7 @@ void PILOT::growTree(node *nd,
         nd->slopeR = arma::datum::nan;
         nd->rangeL = arma::datum::nan;
         nd->rangeR = arma::datum::nan;
+        nd->rss_reduction = 0.0; // reverted to constant, no reduction
         res(nd->obsIds) -= nd->intL; // subtract mean
         nd->rss = arma::sum(arma::square(res(nd->obsIds)));
         // set type to con, and no new call to growtree
