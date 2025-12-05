@@ -338,9 +338,9 @@ def load_data(
         raise ValueError(f"kind must be one of 'uci' or 'pmlb' but received {kind}")
 
 
-def fit_cart(train_dataset: Dataset, test_dataset: Dataset) -> FitResult:
+def fit_cart(train_dataset: Dataset, test_dataset: Dataset, max_depth=None) -> FitResult:
     t1 = time.time()
-    model = DecisionTreeRegressor()
+    model = DecisionTreeRegressor(max_depth=max_depth)
     model.fit(train_dataset.X_oh_encoded, train_dataset.y)
     t2 = time.time()
     try:
@@ -370,6 +370,7 @@ def fit_cpilot(
     rel_tolerance=0.01,
     precision_scale=1e-10,
     max_pivot: float | None = None,
+    df_settings: dict[str, int] | None = None,
 ) -> FitResult:
     t1 = time.time()
     max_features = (
@@ -377,12 +378,17 @@ def fit_cpilot(
         if max_node_features == "sqrt"
         else int(max_node_features * train_dataset.n_features)
     )
+    # Convert df_settings dict to list if provided
+    if df_settings is not None:
+        dfs = list(df_settings.values())
+    # Convert None to a large value for unlimited depth
+    effective_max_depth = max_model_depth if max_depth is None else max_depth
     model = CPILOT(
         dfs,
         min_sample_leaf,
         min_sample_alpha,
         min_sample_fit,
-        max_depth,
+        effective_max_depth,
         max_model_depth,
         max_features,
         0 if max_pivot is None else max_pivot,

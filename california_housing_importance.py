@@ -28,28 +28,28 @@ def main():
     print("Generating scatter plots...")
     for feature in feature_names:
         plt.figure(figsize=(10, 6))
-        
+
         # Check for log scale
-        is_log = feature == "AveOccup"
+        is_log = feature in []
         if is_log:
-            plt.xscale('log')
-            
-        plt.scatter(df[feature], df['Target'], alpha=0.5, s=10)
-        
+            plt.xscale("log")
+
+        plt.scatter(df[feature], df["Target"], alpha=0.5, s=10)
+
         xlabel = f"{feature} (log scale)" if is_log else feature
-        plt.title(f"{feature} vs Target (Median House Value)")
-        plt.xlabel(xlabel)
-        plt.ylabel("Median House Value (x$100k)")
-        plt.grid(True, linestyle='--', alpha=0.7, which="both" if is_log else "major")
-        
+        plt.xlabel(xlabel, fontsize=20)
+        plt.ylabel("Median House Value (x$100k)", fontsize=20)
+        plt.tick_params(axis="both", labelsize=18)
+        plt.grid(True, linestyle="--", alpha=0.7, which="both" if is_log else "major")
+
         # Save as PNG
         png_path = os.path.join(output_dir, f"scatter_{feature}.png")
         plt.savefig(png_path)
-        
+
         # Save as PDF
         pdf_path = os.path.join(output_dir, f"scatter_{feature}.pdf")
         plt.savefig(pdf_path)
-        
+
         plt.close()
         print(f"Saved {png_path} and {pdf_path}")
 

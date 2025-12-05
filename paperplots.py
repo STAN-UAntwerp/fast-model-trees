@@ -19,6 +19,7 @@ DRAFFLE = "CPF - df alpha = 0.5, no blin - max_depth = 20 - max_node_features = 
 
 
 def load_basetable():
+    # Load main results (RF, CPF, XGB, old CART/PILOT)
     basetable = pd.concat(
         [
             pd.read_csv(outputfolder / "cpilot_forest_benchmark_v11" / "results.csv"),
@@ -30,11 +31,25 @@ def load_basetable():
         ]
     )
 
+    # Load new CART/PILOT HP tuning results
+    cart_pilot_results = pd.read_csv(
+        outputfolder / "cart_pilot_hp_tuning" / "results.csv"
+    )
+
+    # Remove old CART and CPILOT results from basetable
+    basetable = basetable[~basetable["model"].str.startswith("CART")]
+    basetable = basetable[~basetable["model"].str.startswith("CPILOT")]
+
+    # Combine all results
+    basetable = pd.concat([basetable, cart_pilot_results], ignore_index=True)
+
+    # Average across folds for each HP combination
     basetable = basetable.groupby(["id", "model"])["r2"].mean().reset_index()
     basetable = basetable.assign(
         basemodel=basetable["model"].str.split("-").str[0].str.strip()
     )
 
+    # Get best HP combination per base model
     besttable = (
         basetable.groupby(["id", "basemodel"])["r2"]
         .max()
@@ -42,6 +57,8 @@ def load_basetable():
         .rename(columns={"basemodel": "model"})
         .assign(model=lambda df: df["model"].map(lambda m: MODELMAP.get(m, m)))
     )
+
+    # Get dRaFFLE specific configuration
     draffletable = (
         basetable.loc[basetable["model"] == DRAFFLE]
         .assign(model="dRaFFLE")
@@ -53,6 +70,7 @@ def load_basetable():
 
 def load_fit_duration_table():
     """Load fit_duration data from results files."""
+    # Load main results (RF, CPF, XGB, old CART/PILOT)
     basetable = pd.concat(
         [
             pd.read_csv(outputfolder / "cpilot_forest_benchmark_v11" / "results.csv"),
@@ -64,6 +82,19 @@ def load_fit_duration_table():
         ]
     )
 
+    # Load new CART/PILOT HP tuning results
+    cart_pilot_results = pd.read_csv(
+        outputfolder / "cart_pilot_hp_tuning" / "results.csv"
+    )
+
+    # Remove old CART and CPILOT results from basetable
+    basetable = basetable[~basetable["model"].str.startswith("CART")]
+    basetable = basetable[~basetable["model"].str.startswith("CPILOT")]
+
+    # Combine all results
+    basetable = pd.concat([basetable, cart_pilot_results], ignore_index=True)
+
+    # Average across folds for each HP combination
     basetable = basetable.groupby(["id", "model"])["fit_duration"].mean().reset_index()
     basetable = basetable.assign(
         basemodel=basetable["model"].str.split("-").str[0].str.strip()
@@ -159,7 +190,7 @@ def plot_overall_boxplot(reltable):
     fig, ax = plt.subplots(1, 1, figsize=(20, 12))
     sns.boxplot(data=reltable, x="model", y="r2", ax=ax, order=MODELORDER)
     ax.set_ylabel(r"Relative $R^2$", fontsize=30)
-    ax.set_xlabel("Model", fontsize=30)
+    ax.set_xlabel(None)
     ax.tick_params(axis="y", which="major", labelsize=22)
     ax.tick_params(axis="x", which="major", labelsize=26)
     fig.tight_layout()
@@ -171,7 +202,7 @@ def plot_lin_vs_nonlin_boxplot(reltable):
     fig, ax = plt.subplots(1, 1, figsize=(20, 12))
     sns.boxplot(data=reltable, x="model", y="r2", hue="Type", ax=ax, order=MODELORDER)
     ax.set_ylabel(r"Relative $R^2$", fontsize=30)
-    ax.set_xlabel("Model", fontsize=30)
+    ax.set_xlabel(None)
     ax.tick_params(axis="y", which="major", labelsize=22)
     ax.tick_params(axis="x", which="major", labelsize=26)
     _ = ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.1), ncol=2, fontsize=26)
@@ -447,61 +478,578 @@ def create_fit_duration_latex_table(fit_duration_table):
     )
 
 
+def create_relative_r2_latex_table(basetable):
+    """Create LaTeX tables with relative R² values (with clipping) per model per dataset.
+    Splits the table across multiple pages following the paper format."""
+    # Load the source information if available
+    try:
+        # Try to get source column from one of the results files
+        results_df = pd.read_csv(
+            outputfolder / "cpilot_forest_benchmark_v11" / "results.csv"
+        )
+        source_map = (
+            results_df[["id", "source"]]
+            .drop_duplicates()
+            .set_index("id")["source"]
+            .to_dict()
+        )
+    except:
+        source_map = {}
+
+    # Create relative table with clipping (original behavior)
+    reltable = basetable.pivot(index="id", columns="model", values="r2")
+    reltable_clipped = reltable.clip(0, 1)
+    reltable_normalized = reltable_clipped / reltable_clipped.max(
+        axis=1
+    ).values.reshape(-1, 1)
+
+    # Reorder columns according to MODELORDER
+    reltable_normalized = reltable_normalized[
+        [col for col in MODELORDER if col in reltable_normalized.columns]
+    ]
+
+    # Filter out uci_162 (dataset with all negative R² values)
+    reltable_normalized = reltable_normalized[reltable_normalized.index != "uci_162"]
+
+    # Add source column
+    reltable_normalized.insert(
+        0, "source", reltable_normalized.index.map(lambda x: source_map.get(x, ""))
+    )
+    reltable_normalized = reltable_normalized.reset_index()
+
+    # Sort by source (PMLB before UCI) and then by numeric part of id
+    def extract_sort_keys(id_str):
+        parts = str(id_str).split("_", 1)
+        if len(parts) == 2:
+            source = parts[0].lower()
+            try:
+                numeric_id = int(parts[1])
+            except ValueError:
+                numeric_id = 0
+            return (source, numeric_id)
+        return ("", 0)
+
+    reltable_normalized["_sort_keys"] = reltable_normalized["id"].apply(
+        extract_sort_keys
+    )
+    reltable_normalized = reltable_normalized.sort_values("_sort_keys").drop(
+        columns="_sort_keys"
+    )
+
+    # Split data into roughly 3 equal parts
+    n_rows = len(reltable_normalized)
+    split1 = n_rows // 3
+    split2 = 2 * n_rows // 3
+
+    tables = [
+        reltable_normalized.iloc[:split1],
+        reltable_normalized.iloc[split1:split2],
+        reltable_normalized.iloc[split2:],
+    ]
+
+    # Calculate average and std for the footer (across all datasets)
+    avg_row = reltable_normalized[
+        [col for col in MODELORDER if col in reltable_normalized.columns]
+    ].mean()
+    std_row = reltable_normalized[
+        [col for col in MODELORDER if col in reltable_normalized.columns]
+    ].std()
+
+    latex_output = ""
+
+    for i, table_part in enumerate(tables, 1):
+        latex_output += f"\\renewcommand{{\\arraystretch}}{{0.9}}\n"
+        latex_output += f"\\begin{{table}}[ht]\n"
+        latex_output += f"\\caption{{Average $R^2$ score divided by highest average $R^2$ score per dataset ({i}/III)}}\n"
+        latex_output += f"\\label{{tab:empirical_results_p{i}}}\n"
+        latex_output += f"\\centering\n"
+        latex_output += f"\\footnotesize\n"
+
+        # Build column format
+        model_cols = [col for col in MODELORDER if col in table_part.columns]
+        n_cols = len(model_cols) + 2  # +2 for source and id
+        latex_output += (
+            f"\\begin{{tabularx}}{{\\textwidth}}{{ll" + "r" * len(model_cols) + "}\n"
+        )
+        latex_output += "\\toprule\n"
+
+        # Header row with special formatting for dRaFFLE
+        header = "source &  id"
+        for col in model_cols:
+            if col == "dRaFFLE":
+                header += " &  \\makecell{RaFFLE \\\\Default}"
+            else:
+                header += f" & {col:>6}"
+        header += " \\\\\n"
+        latex_output += header
+        latex_output += "\\midrule\n"
+
+        # Data rows
+        for _, row in table_part.iterrows():
+            # Find best value(s) in this row (within tolerance)
+            row_values = {col: row[col] for col in model_cols}
+            max_val = max(row_values.values())
+
+            # Split id into source and numeric id
+            id_parts = str(row["id"]).split("_", 1)
+            if len(id_parts) == 2:
+                source_part, id_part = id_parts
+            else:
+                source_part, id_part = "", str(row["id"])
+
+            # Capitalize source (PMLB, UCI, etc.)
+            source_part = source_part.upper()
+
+            line = f"{source_part:>6} & {id_part:>3}"
+            for col in model_cols:
+                val = row[col]
+                if pd.notna(val):
+                    # Check if this is a best value (within 0.01 tolerance)
+                    if val >= max_val - 0.01:
+                        line += f" & \\textbf{{{val:>4.2f}}}"
+                    else:
+                        line += f" & {val:>6.2f}"
+                else:
+                    line += " &      -"
+            line += " \\\\\n"
+            latex_output += line
+
+        # Add average and std in the last table
+        if i == 3:
+            latex_output += "\\midrule\n"
+            line = "       & average"
+            for col in model_cols:
+                val = avg_row[col]
+                if val >= avg_row.max() - 0.01:
+                    line += f" & \\textbf{{{val:>4.2f}}}"
+                else:
+                    line += f" & {val:>10.2f}"
+            line += " \\\\\n"
+            latex_output += line
+
+            line = "       &  std"
+            for col in model_cols:
+                line += f" & {std_row[col]:>10.2f}"
+            line += " \\\\\n"
+            latex_output += line
+
+        latex_output += "\\bottomrule\n"
+        latex_output += "\\end{tabularx}\n"
+        latex_output += "\\end{table}\n\n"
+
+    # Save to file
+    with open(outputfolder / "paperplots" / "relative_r2_table_clipped.tex", "w") as f:
+        f.write(latex_output)
+
+    print(
+        f"LaTeX table saved to {outputfolder / 'paperplots' / 'relative_r2_table_clipped.tex'}"
+    )
+
+
+def create_relative_r2_latex_table_unclipped(basetable):
+    """Create LaTeX tables with relative R² values without clipping negative values.
+    Values that differ from the clipped version are highlighted in red.
+    Splits the table across multiple pages following the paper format."""
+    # Load the source information if available
+    try:
+        results_df = pd.read_csv(
+            outputfolder / "cpilot_forest_benchmark_v11" / "results.csv"
+        )
+        source_map = (
+            results_df[["id", "source"]]
+            .drop_duplicates()
+            .set_index("id")["source"]
+            .to_dict()
+        )
+    except:
+        source_map = {}
+
+    # Create relative table WITH clipping (for comparison)
+    reltable = basetable.pivot(index="id", columns="model", values="r2")
+    reltable_clipped = reltable.clip(0, 1)
+    reltable_clipped_normalized = reltable_clipped / reltable_clipped.max(
+        axis=1
+    ).values.reshape(-1, 1)
+
+    # Create relative table WITHOUT clipping
+    # Use the same normalization factor (max of clipped values) for consistency
+    max_clipped = reltable_clipped.max(axis=1).values.reshape(-1, 1)
+    # Avoid division by zero - if max is 0, set it to 1 to avoid inf
+    max_clipped = np.where(max_clipped == 0, 1, max_clipped)
+    reltable_unclipped_normalized = reltable / max_clipped
+
+    # Reorder columns according to MODELORDER
+    model_cols = [
+        col for col in MODELORDER if col in reltable_unclipped_normalized.columns
+    ]
+    reltable_clipped_normalized = reltable_clipped_normalized[model_cols]
+    reltable_unclipped_normalized = reltable_unclipped_normalized[model_cols]
+
+    # Filter out uci_162 (dataset with all negative R² values)
+    reltable_clipped_normalized = reltable_clipped_normalized[
+        reltable_clipped_normalized.index != "uci_162"
+    ]
+    reltable_unclipped_normalized = reltable_unclipped_normalized[
+        reltable_unclipped_normalized.index != "uci_162"
+    ]
+
+    # Add source column
+    reltable_unclipped_normalized.insert(
+        0,
+        "source",
+        reltable_unclipped_normalized.index.map(lambda x: source_map.get(x, "")),
+    )
+    reltable_unclipped_normalized = reltable_unclipped_normalized.reset_index()
+
+    reltable_clipped_normalized.insert(
+        0,
+        "source",
+        reltable_clipped_normalized.index.map(lambda x: source_map.get(x, "")),
+    )
+    reltable_clipped_normalized = reltable_clipped_normalized.reset_index()
+
+    # Sort by source (PMLB before UCI) and then by numeric part of id
+    def extract_sort_keys(id_str):
+        parts = str(id_str).split("_", 1)
+        if len(parts) == 2:
+            source = parts[0].lower()
+            try:
+                numeric_id = int(parts[1])
+            except ValueError:
+                numeric_id = 0
+            return (source, numeric_id)
+        return ("", 0)
+
+    reltable_unclipped_normalized["_sort_keys"] = reltable_unclipped_normalized[
+        "id"
+    ].apply(extract_sort_keys)
+    reltable_unclipped_normalized = (
+        reltable_unclipped_normalized.sort_values("_sort_keys")
+        .drop(columns="_sort_keys")
+        .reset_index(drop=True)
+    )
+
+    reltable_clipped_normalized["_sort_keys"] = reltable_clipped_normalized["id"].apply(
+        extract_sort_keys
+    )
+    reltable_clipped_normalized = (
+        reltable_clipped_normalized.sort_values("_sort_keys")
+        .drop(columns="_sort_keys")
+        .reset_index(drop=True)
+    )
+
+    # Split data into roughly 3 equal parts
+    n_rows = len(reltable_unclipped_normalized)
+    split1 = n_rows // 3
+    split2 = 2 * n_rows // 3
+
+    tables_unclipped = [
+        reltable_unclipped_normalized.iloc[:split1],
+        reltable_unclipped_normalized.iloc[split1:split2],
+        reltable_unclipped_normalized.iloc[split2:],
+    ]
+
+    tables_clipped = [
+        reltable_clipped_normalized.iloc[:split1],
+        reltable_clipped_normalized.iloc[split1:split2],
+        reltable_clipped_normalized.iloc[split2:],
+    ]
+
+    # Calculate average and std for the footer (across all datasets)
+    avg_row = reltable_unclipped_normalized[model_cols].mean()
+    std_row = reltable_unclipped_normalized[model_cols].std()
+
+    latex_output = "% Requires \\usepackage{xcolor} in your LaTeX preamble\n\n"
+
+    for table_idx, (table_unclipped, table_clipped) in enumerate(
+        zip(tables_unclipped, tables_clipped), 1
+    ):
+        latex_output += f"\\renewcommand{{\\arraystretch}}{{0.9}}\n"
+        latex_output += f"\\begin{{table}}[ht]\n"
+        latex_output += f"\\caption{{Average $R^2$ score divided by highest average $R^2$ score per dataset (without clipping) ({table_idx}/III). Values in \\textcolor{{red}}{{red}} differ from the clipped version.}}\n"
+        latex_output += f"\\label{{tab:empirical_results_unclipped_p{table_idx}}}\n"
+        latex_output += f"\\centering\n"
+        latex_output += f"\\footnotesize\n"
+
+        # Build column format
+        n_cols = len(model_cols) + 2  # +2 for source and id
+        latex_output += (
+            f"\\begin{{tabularx}}{{\\textwidth}}{{ll" + "r" * len(model_cols) + "}\n"
+        )
+        latex_output += "\\toprule\n"
+
+        # Header row with special formatting for dRaFFLE
+        header = "source &  id"
+        for col in model_cols:
+            if col == "dRaFFLE":
+                header += " &  \\makecell{RaFFLE \\\\Default}"
+            else:
+                header += f" & {col:>6}"
+        header += " \\\\\n"
+        latex_output += header
+        latex_output += "\\midrule\n"
+
+        # Data rows
+        for row_idx, (idx_unclipped, row_unclipped) in enumerate(
+            table_unclipped.iterrows()
+        ):
+            row_clipped = table_clipped.iloc[row_idx]
+
+            # Find best value(s) in this row (within tolerance)
+            row_values = {col: row_unclipped[col] for col in model_cols}
+            max_val = max(row_values.values())
+
+            # Split id into source and numeric id
+            id_parts = str(row_unclipped["id"]).split("_", 1)
+            if len(id_parts) == 2:
+                source_part, id_part = id_parts
+            else:
+                source_part, id_part = "", str(row_unclipped["id"])
+
+            # Capitalize source (PMLB, UCI, etc.)
+            source_part = source_part.upper()
+
+            line = f"{source_part:>6} & {id_part:>3}"
+            for col in model_cols:
+                val_unclipped = row_unclipped[col]
+                val_clipped = row_clipped[col]
+
+                if pd.notna(val_unclipped):
+                    # Check if values differ (with small tolerance for floating point comparison)
+                    differs = abs(val_clipped - val_unclipped) > 1e-6
+
+                    # Check if this is a best value (within 0.01 tolerance)
+                    is_best = val_unclipped >= max_val - 0.01
+
+                    if differs:
+                        if is_best:
+                            line += f" & \\textcolor{{red}}{{\\textbf{{{val_unclipped:>4.2f}}}}}"
+                        else:
+                            line += f" & \\textcolor{{red}}{{{val_unclipped:>6.2f}}}"
+                    else:
+                        if is_best:
+                            line += f" & \\textbf{{{val_unclipped:>4.2f}}}"
+                        else:
+                            line += f" & {val_unclipped:>6.2f}"
+                else:
+                    line += " &      -"
+            line += " \\\\\n"
+            latex_output += line
+
+        # Add average and std in the last table
+        if table_idx == 3:
+            latex_output += "\\midrule\n"
+            line = "       & average"
+            for col in model_cols:
+                val = avg_row[col]
+                if val >= avg_row.max() - 0.01:
+                    line += f" & \\textbf{{{val:>4.2f}}}"
+                else:
+                    line += f" & {val:>10.2f}"
+            line += " \\\\\n"
+            latex_output += line
+
+            line = "       &  std"
+            for col in model_cols:
+                line += f" & {std_row[col]:>10.2f}"
+            line += " \\\\\n"
+            latex_output += line
+
+        latex_output += "\\bottomrule\n"
+        latex_output += "\\end{tabularx}\n"
+        latex_output += "\\end{table}\n\n"
+
+    # Save to file
+    with open(
+        outputfolder / "paperplots" / "relative_r2_table_unclipped.tex", "w"
+    ) as f:
+        f.write(latex_output)
+
+    print(
+        f"LaTeX table saved to {outputfolder / 'paperplots' / 'relative_r2_table_unclipped.tex'}"
+    )
+
+
+def create_r2_pairplot(basetable):
+    """Create pairplots of raw R² values with clipping for CART, Lasso, and Ridge.
+
+    Shows scatter plots with y=x line and histograms on diagonal.
+    """
+    # Pivot the table to have datasets as rows and models as columns
+    r2_table = basetable.pivot(index="id", columns="model", values="r2")
+
+    # Reorder columns according to MODELORDER
+    model_cols = ["CART", "Lasso", "Ridge"]
+    r2_table = r2_table[model_cols]
+
+    # Clip values to [0, 1] for CART, Lasso, and Ridge
+    for model in model_cols:
+        if model in r2_table.columns:
+            r2_table[model] = r2_table[model].clip(0, 1)
+
+    # Filter out uci_162 (dataset with all negative R² values)
+    r2_table = r2_table[r2_table.index != "uci_162"]
+
+    # Create custom PairGrid for better control
+    g = sns.PairGrid(r2_table, diag_sharey=False, height=2.5, aspect=1)
+
+    # Map scatter plots to the lower triangle with y=x line
+    def scatter_with_line(x, y, **kwargs):
+        plt.scatter(x, y, alpha=0.5, s=20, **kwargs)
+        # Get axis limits
+        lims = [max(plt.xlim()[0], plt.ylim()[0]), min(plt.xlim()[1], plt.ylim()[1])]
+        # Plot y=x line
+        plt.plot(lims, lims, "r-", alpha=0.75, zorder=0, linewidth=1.5)
+        plt.xlim(plt.xlim())
+        plt.ylim(plt.ylim())
+
+    # Map histograms to diagonal
+    g.map_diag(plt.hist, bins=20, edgecolor="black", alpha=0.7)
+
+    # Map scatter plots with y=x line to off-diagonal
+    g.map_offdiag(scatter_with_line)
+
+    # Increase fontsize of axis labels
+    for ax in g.axes.flatten():
+        ax.tick_params(axis='both', labelsize=16)
+        if ax.get_xlabel():
+            ax.set_xlabel(ax.get_xlabel(), fontsize=18)
+        if ax.get_ylabel():
+            ax.set_ylabel(ax.get_ylabel(), fontsize=18)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    # Save figures
+    g.savefig(figurefolder / "r2_pairplot.png", dpi=300, bbox_inches="tight")
+    g.savefig(figurefolder / "r2_pairplot.pdf", dpi=300, bbox_inches="tight")
+
+    print(f"R² pairplot saved to {figurefolder / 'r2_pairplot.png'}")
+    print(f"R² pairplot saved to {figurefolder / 'r2_pairplot.pdf'}")
+
+
 def compare_feature_importance(X, y, feature_names, dataset_name, file_prefix):
     """Compare feature importances between RaFFLE and sklearn RandomForest."""
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.model_selection import KFold
     from pilot.c_ensemble import RandomForestCPilot
+    import pickle
 
-    # Use 5-fold cross-validation
-    n_folds = 5
-    kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+    # Check if cached results exist
+    cache_file = figurefolder / f"{file_prefix}_cv_results.pkl"
 
-    # Storage for feature importances and scores across folds
-    importance_sklearn_folds = []
-    importance_raffle_folds = []
-    r2_sklearn_folds = []
-    r2_raffle_folds = []
+    if cache_file.exists():
+        print(f"Loading cached cross-validation results from {cache_file}...")
+        with open(cache_file, "rb") as f:
+            cached_data = pickle.load(f)
 
-    print(f"Running {n_folds}-fold cross-validation on {dataset_name}...")
-    for fold_idx, (train_idx, test_idx) in enumerate(kf.split(X), 1):
-        print(f"  Fold {fold_idx}/{n_folds}...")
-        X_train, X_test = X[train_idx], X[test_idx]
-        y_train, y_test = y[train_idx], y[test_idx]
+        importance_sklearn = cached_data["importance_sklearn"]
+        importance_raffle = cached_data["importance_raffle"]
+        r2_sklearn = cached_data["r2_sklearn"]
+        r2_sklearn_std = cached_data["r2_sklearn_std"]
+        r2_raffle = cached_data["r2_raffle"]
+        r2_raffle_std = cached_data["r2_raffle_std"]
+        node_type_counts = cached_data.get("node_type_counts", None)
 
-        # Train sklearn RandomForest
-        rf_sklearn = RandomForestRegressor(
-            n_estimators=100, max_depth=5, random_state=42, n_jobs=-1
+        print(
+            f"Loaded results: sklearn R²={r2_sklearn:.4f}±{r2_sklearn_std:.4f}, RaFFLE R²={r2_raffle:.4f}±{r2_raffle_std:.4f}"
         )
-        rf_sklearn.fit(X_train, y_train)
-        importance_sklearn_folds.append(rf_sklearn.feature_importances_)
-        r2_sklearn_folds.append(rf_sklearn.score(X_test, y_test))
+    else:
+        # Use 5-fold cross-validation
+        n_folds = 5
+        kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
 
-        # Train RaFFLE
-        rf_raffle = RandomForestCPilot(
-            n_estimators=100,
-            max_depth=5,
-            n_features_tree=1.0,
-            n_features_node=1.0,
-            random_state=42,
-        )
-        rf_raffle.fit(X_train, y_train)
-        importance_raffle_folds.append(rf_raffle.feature_importances_)
-        y_pred = rf_raffle.predict(X_test)
-        r2_raffle = 1 - np.sum((y_test - y_pred) ** 2) / np.sum(
-            (y_test - y_test.mean()) ** 2
-        )
-        r2_raffle_folds.append(r2_raffle)
+        # Storage for feature importances and scores across folds
+        importance_sklearn_folds = []
+        importance_raffle_folds = []
+        r2_sklearn_folds = []
+        r2_raffle_folds = []
 
-    # Average feature importances across folds
-    importance_sklearn = np.mean(importance_sklearn_folds, axis=0)
-    importance_raffle = np.mean(importance_raffle_folds, axis=0)
+        print(f"Running {n_folds}-fold cross-validation on {dataset_name}...")
+        for fold_idx, (train_idx, test_idx) in enumerate(kf.split(X), 1):
+            print(f"  Fold {fold_idx}/{n_folds}...")
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y[train_idx], y[test_idx]
 
-    # Average R² scores
-    r2_sklearn = np.mean(r2_sklearn_folds)
-    r2_raffle = np.mean(r2_raffle_folds)
-    r2_sklearn_std = np.std(r2_sklearn_folds)
-    r2_raffle_std = np.std(r2_raffle_folds)
+            # Train sklearn RandomForest
+            rf_sklearn = RandomForestRegressor(
+                n_estimators=100, max_depth=5, random_state=42, n_jobs=-1
+            )
+            rf_sklearn.fit(X_train, y_train)
+            importance_sklearn_folds.append(rf_sklearn.feature_importances_)
+            r2_sklearn_folds.append(rf_sklearn.score(X_test, y_test))
+
+            # Train RaFFLE
+            rf_raffle = RandomForestCPilot(
+                n_estimators=100,
+                max_depth=5,
+                n_features_tree=1.0,
+                n_features_node=1.0,
+                random_state=42,
+            )
+            rf_raffle.fit(X_train, y_train)
+            importance_raffle_folds.append(rf_raffle.feature_importances_)
+            y_pred = rf_raffle.predict(X_test)
+            r2_raffle = 1 - np.sum((y_test - y_pred) ** 2) / np.sum(
+                (y_test - y_test.mean()) ** 2
+            )
+            r2_raffle_folds.append(r2_raffle)
+
+        # Average feature importances across folds
+        importance_sklearn = np.mean(importance_sklearn_folds, axis=0)
+        importance_raffle = np.mean(importance_raffle_folds, axis=0)
+
+        # Average R² scores
+        r2_sklearn = np.mean(r2_sklearn_folds)
+        r2_raffle = np.mean(r2_raffle_folds)
+        r2_sklearn_std = np.std(r2_sklearn_folds)
+        r2_raffle_std = np.std(r2_raffle_folds)
+
+        # Analyze node types per feature for RaFFLE (using last fold's model)
+        print(f"\nAnalyzing node types per feature for RaFFLE ({dataset_name})...")
+
+        # Initialize counters for each node type per feature
+        node_type_counts = {
+            fname: {
+                "con": 0,
+                "lin": 0,
+                "pcon": 0,
+                "blin": 0,
+                "plin": 0,
+                "pconc": 0,
+                "total": 0,
+            }
+            for fname in feature_names
+        }
+
+        # Aggregate node types across all trees in the last fold's forest
+        for tree in rf_raffle.estimators:
+            # tree_summary already handles feature_idx mapping internally
+            tree_summary = tree.tree_summary(feature_names=feature_names)
+
+            # Count node types per feature
+            for _, row in tree_summary.iterrows():
+                if not pd.isna(row.get("feature_name")):
+                    node_type = row["node_type"]
+                    feature = row["feature_name"]
+                    if feature in node_type_counts:
+                        node_type_counts[feature][node_type] += 1
+                        node_type_counts[feature]["total"] += 1
+
+        # Save results to cache
+        print(f"Saving cross-validation results to {cache_file}...")
+        cached_data = {
+            "importance_sklearn": importance_sklearn,
+            "importance_raffle": importance_raffle,
+            "r2_sklearn": r2_sklearn,
+            "r2_sklearn_std": r2_sklearn_std,
+            "r2_raffle": r2_raffle,
+            "r2_raffle_std": r2_raffle_std,
+            "node_type_counts": node_type_counts,
+        }
+        with open(cache_file, "wb") as f:
+            pickle.dump(cached_data, f)
+        print(f"Cached results saved.")
 
     # Create comparison dataframe
     importance_df = pd.DataFrame(
@@ -520,75 +1068,41 @@ def compare_feature_importance(X, y, feature_names, dataset_name, file_prefix):
         .drop("abs_diff", axis=1)
     )
 
-    # Analyze node types per feature for RaFFLE (using last fold's model)
-    print(f"\\nAnalyzing node types per feature for RaFFLE ({dataset_name})...")
+    # Create dataframe for node type analysis (if available)
+    if node_type_counts is not None:
+        node_type_df = pd.DataFrame.from_dict(node_type_counts, orient="index")
+        node_type_df = node_type_df.sort_values("total", ascending=False)
 
-    # Initialize counters for each node type per feature
-    node_type_counts = {
-        fname: {
-            "con": 0,
-            "lin": 0,
-            "pcon": 0,
-            "blin": 0,
-            "plin": 0,
-            "pconc": 0,
-            "total": 0,
-        }
-        for fname in feature_names
-    }
+        # Save as markdown table
+        node_type_filename = f"{file_prefix}_node_types.md"
+        markdown_table = f"# RaFFLE Node Type Analysis ({dataset_name})\\n\\n"
+        markdown_table += "Analysis based on 100 trees from the last fold.\\n\\n"
+        markdown_table += "## Node Type Counts per Feature\\n\\n"
+        markdown_table += node_type_df.to_markdown()
+        markdown_table += "\\n\\n## Node Type Legend\\n\\n"
+        markdown_table += "- **con**: Constant node (no split)\\n"
+        markdown_table += "- **lin**: Linear node (simple linear model)\\n"
+        markdown_table += "- **pcon**: Piecewise constant\\n"
+        markdown_table += "- **blin**: Bilinear\\n"
+        markdown_table += "- **plin**: Piecewise linear\\n"
+        markdown_table += "- **pconc**: Piecewise constant constrained\\n"
+        markdown_table += "- **total**: Total number of splits using this feature\\n"
 
-    # Aggregate node types across all trees in the last fold's forest
-    for tree in rf_raffle.estimators:
-        # tree_summary already handles feature_idx mapping internally
-        tree_summary = tree.tree_summary(feature_names=feature_names)
+        with open(figurefolder / node_type_filename, "w") as f:
+            f.write(markdown_table)
 
-        # Count node types per feature
-        for _, row in tree_summary.iterrows():
-            if not pd.isna(row.get("feature_name")):
-                node_type = row["node_type"]
-                feature = row["feature_name"]
-                if feature in node_type_counts:
-                    node_type_counts[feature][node_type] += 1
-                    node_type_counts[feature]["total"] += 1
-
-    # Create dataframe for node type analysis
-    node_type_df = pd.DataFrame.from_dict(node_type_counts, orient="index")
-    node_type_df = node_type_df.sort_values("total", ascending=False)
-
-    # Save as markdown table
-    node_type_filename = f"{file_prefix}_node_types.md"
-    markdown_table = f"# RaFFLE Node Type Analysis ({dataset_name})\\n\\n"
-    markdown_table += (
-        f"Analysis based on {len(rf_raffle.estimators)} trees from the last fold.\\n\\n"
-    )
-    markdown_table += "## Node Type Counts per Feature\\n\\n"
-    markdown_table += node_type_df.to_markdown()
-    markdown_table += "\\n\\n## Node Type Legend\\n\\n"
-    markdown_table += "- **con**: Constant node (no split)\\n"
-    markdown_table += "- **lin**: Linear node (simple linear model)\\n"
-    markdown_table += "- **pcon**: Piecewise constant\\n"
-    markdown_table += "- **blin**: Bilinear\\n"
-    markdown_table += "- **plin**: Piecewise linear\\n"
-    markdown_table += "- **pconc**: Piecewise constant constrained\\n"
-    markdown_table += "- **total**: Total number of splits using this feature\\n"
-
-    with open(figurefolder / node_type_filename, "w") as f:
-        f.write(markdown_table)
-
-    print(f"Node type analysis saved to {figurefolder / node_type_filename}")
-
-    # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-    # Subplot 1: Side-by-side comparison
-    x = np.arange(len(feature_names))
-    width = 0.35
+        print(f"Node type analysis saved to {figurefolder / node_type_filename}")
 
     # Reorder for plotting (by sklearn importance)
     plot_order = np.argsort(importance_sklearn)[::-1]
     features_ordered = [feature_names[i] for i in plot_order]
     sklearn_ordered = importance_sklearn[plot_order]
     raffle_ordered = importance_raffle[plot_order]
+
+    # Figure 1: Side-by-side comparison
+    fig1, ax1 = plt.subplots(figsize=(8, 6))
+    x = np.arange(len(feature_names))
+    width = 0.35
 
     ax1.bar(
         x - width / 2,
@@ -602,54 +1116,101 @@ def compare_feature_importance(X, y, feature_names, dataset_name, file_prefix):
         x + width / 2, raffle_ordered, width, label="RaFFLE", color="#E1812C", alpha=0.8
     )
 
-    ax1.set_xlabel("Features", fontsize=12)
-    ax1.set_ylabel("Feature Importance", fontsize=12)
-    ax1.set_title(
-        f"Feature Importance Comparison ({dataset_name})\nsklearn R²={r2_sklearn:.4f}±{r2_sklearn_std:.4f}, RaFFLE R²={r2_raffle:.4f}±{r2_raffle_std:.4f}",
-        fontsize=13,
-        fontweight="bold",
-    )
+    ax1.set_xlabel("Features", fontsize=20)
+    ax1.set_ylabel("Feature Importance", fontsize=20)
     ax1.set_xticks(x)
-    ax1.set_xticklabels(features_ordered, rotation=45, ha="right")
-    ax1.legend(fontsize=11)
+    ax1.set_xticklabels(features_ordered, rotation=45, ha="right", fontsize=18)
+    ax1.tick_params(axis="y", labelsize=18)
+    ax1.legend(fontsize=18)
     ax1.grid(axis="y", alpha=0.3)
 
-    # Subplot 2: Difference plot (RaFFLE - sklearn)
+    plt.tight_layout()
+    plot_filename1_pdf = f"{file_prefix}_comparison.pdf"
+    plot_filename1_png = f"{file_prefix}_comparison.png"
+    fig1.savefig(figurefolder / plot_filename1_pdf, dpi=300, bbox_inches="tight")
+    fig1.savefig(figurefolder / plot_filename1_png, dpi=300, bbox_inches="tight")
+
+    # Figure 2: Difference plot (RaFFLE - sklearn)
+    fig2, ax2 = plt.subplots(figsize=(8, 6))
     differences = importance_df["Difference"].values
     colors = ["#2CA02C" if d > 0 else "#D62728" for d in differences]
 
     ax2.barh(importance_df["Feature"], differences, color=colors, alpha=0.7)
     ax2.axvline(0, color="black", linewidth=0.8, linestyle="--")
-    ax2.set_xlabel("Importance Difference\n(RaFFLE - sklearn RF)", fontsize=12)
-    ax2.set_ylabel("Features", fontsize=12)
-    ax2.set_title(
-        "Feature Importance Differences\n(sorted by absolute difference)",
-        fontsize=13,
-        fontweight="bold",
-    )
+    ax2.set_xlabel("Importance Difference (RaFFLE - sklearn RF)", fontsize=20)
+    ax2.set_ylabel("Features", fontsize=20)
+    ax2.tick_params(axis="both", labelsize=18)
     ax2.grid(axis="x", alpha=0.3)
 
     # Add text annotations for significant differences
+    # Place text inside bar to avoid overlap with y-axis labels
     for i, diff in enumerate(differences):
         if abs(diff) > 0.02:  # Only annotate significant differences
+            # Place text inside the bar, away from the end
+            if diff > 0:
+                # For positive bars, place text near the right end but inside
+                text_pos = diff * 0.7
+                ha = "right"
+            else:
+                # For negative bars, place text near the left end but inside
+                text_pos = diff * 0.7
+                ha = "left"
+
             ax2.text(
-                diff,
+                text_pos,
                 i,
                 f"{diff:+.3f}",
                 va="center",
-                ha="left" if diff > 0 else "right",
-                fontsize=9,
+                ha=ha,
+                fontsize=16,
                 fontweight="bold",
+                color="black",  # White text for better contrast on colored bars
             )
 
     plt.tight_layout()
-    plot_filename_pdf = f"{file_prefix}_comparison.pdf"
-    plot_filename_png = f"{file_prefix}_comparison.png"
-    fig.savefig(figurefolder / plot_filename_pdf, dpi=300, bbox_inches="tight")
-    fig.savefig(figurefolder / plot_filename_png, dpi=300, bbox_inches="tight")
-    print(f"\\nFeature importance comparison plots saved to:")
-    print(f"  - {figurefolder / plot_filename_pdf}")
-    print(f"  - {figurefolder / plot_filename_png}")
+    plot_filename2_pdf = f"{file_prefix}_differences.pdf"
+    plot_filename2_png = f"{file_prefix}_differences.png"
+    fig2.savefig(figurefolder / plot_filename2_pdf, dpi=300, bbox_inches="tight")
+    fig2.savefig(figurefolder / plot_filename2_png, dpi=300, bbox_inches="tight")
+
+    # Generate LaTeX snippet for subfigures
+    latex_snippet = "\\begin{figure}[ht]\n"
+    latex_snippet += "    \\centering\n"
+    latex_snippet += "    \\begin{subfigure}[b]{0.48\\textwidth}\n"
+    latex_snippet += "        \\centering\n"
+    latex_snippet += f"        \\includegraphics[width=\\textwidth]{{Output/paperplots/{plot_filename1_pdf}}}\n"
+    latex_snippet += "        \\caption{Feature Importance Comparison}\n"
+    latex_snippet += "        \\label{fig:feature_importance_comparison}\n"
+    latex_snippet += "    \\end{subfigure}\n"
+    latex_snippet += "    \\hfill\n"
+    latex_snippet += "    \\begin{subfigure}[b]{0.48\\textwidth}\n"
+    latex_snippet += "        \\centering\n"
+    latex_snippet += f"        \\includegraphics[width=\\textwidth]{{Output/paperplots/{plot_filename2_pdf}}}\n"
+    latex_snippet += (
+        "        \\caption{Feature Importance Differences (RaFFLE - sklearn RF)}\n"
+    )
+    latex_snippet += "        \\label{fig:feature_importance_differences}\n"
+    latex_snippet += "    \\end{subfigure}\n"
+    latex_snippet += (
+        f"    \\caption{{Feature importance analysis on {dataset_name} dataset. "
+    )
+    latex_snippet += f"(a) Comparison of feature importances between sklearn RF (R²={r2_sklearn:.4f}$\\pm${r2_sklearn_std:.4f}) "
+    latex_snippet += f"and RaFFLE (R²={r2_raffle:.4f}$\\pm${r2_raffle_std:.4f}). "
+    latex_snippet += "(b) Differences in feature importance (RaFFLE - sklearn RF), sorted by absolute difference.}\n"
+    latex_snippet += "    \\label{fig:feature_importance}\n"
+    latex_snippet += "\\end{figure}\n"
+
+    # Save LaTeX snippet to file
+    latex_filename = f"{file_prefix}_latex.tex"
+    with open(figurefolder / latex_filename, "w") as f:
+        f.write(latex_snippet)
+
+    print(f"\nFeature importance plots saved to:")
+    print(f"  - {figurefolder / plot_filename1_pdf}")
+    print(f"  - {figurefolder / plot_filename1_png}")
+    print(f"  - {figurefolder / plot_filename2_pdf}")
+    print(f"  - {figurefolder / plot_filename2_png}")
+    print(f"  - {figurefolder / latex_filename} (LaTeX snippet)")
 
     # Print summary statistics
     print("\\n" + "=" * 80)
@@ -783,6 +1344,21 @@ def plot_california_housing_importance():
     is_flag=True,
     help="Compare feature importances between RaFFLE and sklearn RF on California Housing dataset",
 )
+@click.option(
+    "--relative_r2_table",
+    is_flag=True,
+    help="Create LaTeX table with relative R² values (with clipping)",
+)
+@click.option(
+    "--relative_r2_table_unclipped",
+    is_flag=True,
+    help="Create LaTeX table with relative R² values without clipping (differences highlighted in red)",
+)
+@click.option(
+    "--r2_pairplot",
+    is_flag=True,
+    help="Create pairplot of raw R² values (with clipping for CART, Lasso, Ridge)",
+)
 @click.option("--all", is_flag=True, help="Create all plots")
 @click.pass_context
 def main(
@@ -799,6 +1375,9 @@ def main(
     fit_duration_table,
     feature_importance,
     california_housing_importance,
+    relative_r2_table,
+    relative_r2_table_unclipped,
+    r2_pairplot,
     all,
 ):
     if overall_boxplot or all:
@@ -822,6 +1401,12 @@ def main(
         plot_relative_fit_duration_boxplot_log(ctx.obj["rel_fit_duration_table"])
     if fit_duration_table or all:
         create_fit_duration_latex_table(ctx.obj["fit_duration_table"])
+    if relative_r2_table or all:
+        create_relative_r2_latex_table(ctx.obj["basetable"])
+    if relative_r2_table_unclipped or all:
+        create_relative_r2_latex_table_unclipped(ctx.obj["basetable"])
+    if r2_pairplot or all:
+        create_r2_pairplot(ctx.obj["basetable"])
     if feature_importance:
         plot_graduate_admission_importance()
     if california_housing_importance:
