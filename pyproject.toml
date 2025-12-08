@@ -59,10 +59,10 @@ benchmarks = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/fast-model-trees"
-Documentation = "https://github.com/yourusername/fast-model-trees#readme"
-Repository = "https://github.com/yourusername/fast-model-trees"
-Issues = "https://github.com/yourusername/fast-model-trees/issues"
+Homepage = "https://github.com/STAN-UAntwerp/fast-model-trees"
+Documentation = "https://github.com/STAN-UAntwerp/fast-model-trees#readme"
+Repository = "https://github.com/STAN-UAntwerp/fast-model-trees"
+Issues = "https://github.com/STAN-UAntwerp/fast-model-trees/issues"
 
 [tool.scikit-build]
 # CMake version requirement

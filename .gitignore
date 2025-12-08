@@ -11,4 +11,4 @@ carma/
 pilot/*.so
 screenlog.*
 benchmark_logs.txt
-.DS_Store
+.DS_Storebuild/
