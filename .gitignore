@@ -7,8 +7,9 @@ Output/archive
 pyrightconfig.json
 *.pyc
 build/
+dist/
 carma/
 pilot/*.so
 screenlog.*
 benchmark_logs.txt
-.DS_Storebuild/
+.DS_Store
