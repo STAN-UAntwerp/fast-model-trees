@@ -2,11 +2,12 @@ import numpy as np
 import pandas as pd
 import multiprocessing as mp
 from sklearn.base import BaseEstimator
-from pilot import CPILOT, DEFAULT_DF_SETTINGS
+from .cpilot import PILOT
+from .constants import DEFAULT_DF_SETTINGS
 from functools import partial
 
 
-class CPILOTWrapper(CPILOT):
+class PILOTWrapper(PILOT):
     def __init__(
         self,
         feature_idx: list[int] | np.ndarray,
@@ -87,7 +88,7 @@ class CPILOTWrapper(CPILOT):
         return raw_importance
 
 
-class RandomForestCPilot(BaseEstimator):
+class RaFFLE(BaseEstimator):
     def __init__(
         self,
         n_estimators: int = 10,
@@ -178,7 +179,7 @@ class RandomForestCPilot(BaseEstimator):
         )
         np.random.seed(self.random_state)
         self.estimators = [
-            CPILOTWrapper(
+            PILOTWrapper(
                 feature_idx=np.random.choice(
                     np.arange(X.shape[1]), size=n_features_tree, replace=False
                 ),
@@ -291,3 +292,8 @@ def _fit_single_estimator(estimator, X: np.ndarray, y: np.ndarray, categorical_i
     except ValueError as e:
         print(e)
         return None
+
+
+# Backward compatibility aliases
+RandomForestCPilot = RaFFLE
+CPILOTWrapper = PILOTWrapper

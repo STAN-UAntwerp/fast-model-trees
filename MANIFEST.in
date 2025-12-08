@@ -1,0 +1,23 @@
+# Include C++ source files
+include *.cpp
+include *.h
+include CMakeLists.txt
+
+# Include documentation
+include README.md
+include LICENSE
+include README_PYPI.md
+
+# Include Python package files
+recursive-include pilot *.py
+
+# Exclude build artifacts and development files
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.so
+prune build
+prune .venv
+prune scripts
+prune Data
+prune Output
