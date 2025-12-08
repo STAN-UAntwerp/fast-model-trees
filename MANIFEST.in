@@ -6,7 +6,8 @@ include CMakeLists.txt
 # Include documentation
 include README.md
 include LICENSE
-include README_PYPI.md
+include INSTALL.md
+include DEVELOPMENT.md
 
 # Include Python package files
 recursive-include pilot *.py

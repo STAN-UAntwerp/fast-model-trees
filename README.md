@@ -1,231 +1,149 @@
-This is an implementation for the PIecewise Linear Organic Tree (PILOT), a linear model tree algorithm proposed in the paper Raymaekers, J., Rousseeuw, P. J., Verdonck, T., & Yao, R. (2024). Fast linear model trees by PILOT. Machine Learning, 1-50. https://doi.org/10.1007/s10994-024-06590-3.
+# fast-model-trees
 
-This repository also includes the implementation for RaFFLE, a random forest of PILOT trees:
-Raymaekers, J., Rousseeuw, P. J., Servotte, T., Verdonck, T., & Yao, R. (2025). A Powerful Random Forest Featuring Linear Extensions (RaFFLE). _Under Review_
+Fast implementation of **PILOT** (PIecewise Linear Organic Trees) and **RaFFLE** (Random Forest Featuring Linear Extensions) algorithms.
 
-### Requirements:
+## Overview
 
-This project uses [uv](https://github.com/astral-sh/uv) for Python environment management. First, install uv if you haven't already:
-```
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+This package provides efficient C++-based implementations of:
 
-Then install the project dependencies:
-```
-uv sync
-```
+- **PILOT**: A linear model tree algorithm that builds piecewise linear models
+- **RaFFLE**: A random forest ensemble method using PILOT trees as base learners
 
-This will create a virtual environment and install all required dependencies from `pyproject.toml`.
+## Papers
 
-The RaFFLE implementation uses a c++ version of pilot for computational speed.
-To build the c++ wrapper, follow these steps.
+- **PILOT**: Raymaekers, J., Rousseeuw, P. J., Verdonck, T., & Yao, R. (2024). Fast linear model trees by PILOT. *Machine Learning*, 1-50. https://doi.org/10.1007/s10994-024-06590-3
 
-### Linux
+- **RaFFLE**: Raymaekers, J., Rousseeuw, P. J., Servotte, T., Verdonck, T., & Yao, R. (2025). A Powerful Random Forest Featuring Linear Extensions (RaFFLE). *Under Review*
 
-1.  Make sure the necessary dependencies are installed
-    ```
-    sudo apt-get update
-    sudo apt-get install cmake g++ libopenblas-dev liblapack-dev
-    ```
+## Installation
 
-2.  Install Armadillo
-    ```
-    wget http://sourceforge.net/projects/arma/files/armadillo-14.0.3.tar.xz
-    tar -xvf armadillo-14.0.3.tar.xz
-    cd armadillo-14.0.3/
-    mkdir build
-    cd build
-    cmake ..
-    make
-    sudo make install
-    ```
-
-3.  Install pybind and add to cmake config
-
-    If you used `uv sync` as described in the Requirements section, `pybind11` is already installed. You need to tell cmake where to find the `pybind11` cmake files. Add the following line to your `CMakeLists.txt` *before* the `find_package(pybind11 REQUIRED)` line:
-    ```cmake
-    set(pybind11_DIR <path-to-your-venv>/lib/python3.10/site-packages/pybind11/share/cmake/pybind11)
-    ```
-    If using uv, your venv is located at `.venv/` in the project root.
-
-4.  Install carma
-    Clone the repo: `git@github.com:RUrlus/carma.git`
-    Build the package:
-    ```
-    cd carma
-    mkdir build
-    cd build
-    cmake -DCARMA_INSTALL_LIB=ON ..
-    cmake --build . --config Release --target install
-    ```
-
-5.  Build the wrapper
-    Create a `build` directory in the root of the project, and `cd` into it.
-    ```
-    mkdir build
-    cd build
-    cmake ..
-    make
-    ```
-
-### macOS
-
-1.  **Prerequisites:**
-    *   Make sure you have [Homebrew](https://brew.sh/) installed.
-    *   Install Xcode Command Line Tools by running `xcode-select --install`.
-
-2.  **Dependencies:**
-    Install `cmake`, `openblas`, `lapack` and `armadillo` using Homebrew:
-    ```
-    brew install cmake openblas lapack armadillo
-    ```
-
-3.  **pybind11:**
-    If you used `uv sync` as described in the Requirements section, `pybind11` is already installed. You need to tell cmake where to find the `pybind11` cmake files. Add the following line to your `CMakeLists.txt` *before* the `find_package(pybind11 REQUIRED)` line:
-    ```cmake
-    set(pybind11_DIR <path-to-your-venv>/lib/python3.10/site-packages/pybind11/share/cmake/pybind11)
-    ```
-    If using uv, your venv is located at `.venv/` in the project root.
-
-4.  **carma:**
-    Clone the `carma` repository and build it from source. Note that the last command might require `sudo`.
-    ```
-    git clone git@github.com:RUrlus/carma.git
-    cd carma
-    mkdir build
-    cd build
-    cmake -DCARMA_INSTALL_LIB=ON ..
-    cmake --build . --config Release --target install
-    ```
-
-5.  **Build the wrapper:**
-    Create a `build` directory in the root of the project, and `cd` into it.
-    ```
-    mkdir build
-    cd build
-    cmake ..
-    make
-    ```
-
-### Troubleshooting
-
-If you get an error like this on macOS:
-```
-Could NOT find Python3 (missing: Python3_NumPy_INCLUDE_DIRS NumPy)
-```
-You might have to explicitly set the Python executable and library paths in your `CMakeLists.txt`. Add the following lines *before* the `find_package(Python3 ...)` line:
-
-```cmake
-set(Python3_EXECUTABLE <path-to-your-python-executable>)
-set(Python3_LIBRARY <path-to-your-python-library>)
+```bash
+pip install fast-model-trees
 ```
 
-You can find the paths by running the following commands (make sure you are in your project's virtual environment):
-*   For `Python3_EXECUTABLE`:
-    ```
-    which python
-    ```
-*   For `Python3_LIBRARY`: This path might vary. A good guess is to look for a `.dylib` file in the `lib` directory of your python installation. For example:
-    ```
-    /Users/user/.local/share/uv/python/cpython-3.10.18-macos-aarch64-none/lib/libpython3.10.dylib
-    ```
+### Building from Source
 
-Also, you might need to simplify the `find_package(Python3 ...)` call to:
-```cmake
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-```
+If you need to build from source, you'll need:
+- C++17 compatible compiler
+- CMake >= 3.12
+- Armadillo linear algebra library
+- BLAS and LAPACK libraries
+- pybind11
+- carma (C++ Armadillo/NumPy bridge)
 
+See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
-### Example
-You can run an example for RaFFLE with the [raffle_example.py](raffle_example.py) script.
+### Development
 
-### Feature Importance
+For development setup, running benchmarks, and reproducing paper results, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-Both individual PILOT trees and RaFFLE (Random Forest of PILOT trees) support feature importance extraction, following the scikit-learn RandomForest approach.
+## Quick Start
 
-Feature importance is calculated as the normalized RSS (Residual Sum of Squares) reduction attributed to each feature across all splits in the tree. For random forests, each tree's normalized importances are averaged and then re-normalized, ensuring equal contribution from each tree regardless of its RSS scale.
+### Using RaFFLE (Random Forest)
 
-#### Usage
-
-For a single PILOT tree:
 ```python
-from pilot.c_ensemble import CPILOTWrapper
+from pilot import RaFFLE
 import numpy as np
 
-# Train a tree
-tree = CPILOTWrapper(
-    feature_idx=np.arange(n_features),
-    max_features=n_features,
-    max_depth=5,
-    min_sample_leaf=5
-)
-tree.train(X, y, categorical_idx)
+# Create sample data
+X = np.random.randn(1000, 10)
+y = X[:, 0] + 0.5 * X[:, 1] ** 2 + np.random.randn(1000) * 0.1
 
-# Get feature importances
-importances = tree.feature_importances_
-```
-
-For a RaFFLE random forest:
-```python
-from pilot.c_ensemble import RandomForestCPilot
-
-# Train a random forest
-rf = RandomForestCPilot(
+# Train RaFFLE model
+model = RaFFLE(
     n_estimators=100,
     max_depth=5,
     random_state=42
 )
-rf.fit(X, y)
+model.fit(X, y)
 
-# Get feature importances (averaged across all trees)
-importances = rf.feature_importances_
+# Make predictions
+predictions = model.predict(X)
+
+# Get feature importances
+importances = model.feature_importances_
 ```
 
-Feature importances are returned as a numpy array with shape `(n_features,)`, where each value represents the normalized importance of that feature (importances sum to 1.0). Higher values indicate more important features.
+### Using PILOT (Single Tree)
 
-You can test the feature importance implementation by running:
-```bash
-uv run python test_feature_importance.py
+```python
+from pilot import PILOT, DEFAULT_DF_SETTINGS
+import numpy as np
+
+# Create sample data
+X = np.random.randn(1000, 10)
+y = X[:, 0] + 0.5 * X[:, 1] ** 2 + np.random.randn(1000) * 0.1
+
+# Train PILOT model
+model = PILOT(
+    df_settings=list(DEFAULT_DF_SETTINGS.values()),
+    max_depth=5,
+    max_features=X.shape[1]
+)
+
+# Categorical features (0 = numerical, 1 = categorical)
+categorical = np.zeros(X.shape[1], dtype=int)
+
+model.train(X, y, categorical)
+
+# Make predictions
+predictions = model.predict(X)
 ```
 
-### RaFFLE benchmark
-To run the same benchmark as described in the RaFFLE paper, you first need to download all the benchmark datasets using the [download_data.py](download_data.py) script.
+## Key Features
 
-```bash
-uv run python download_data.py
+- **Fast C++ implementation**: Optimized for performance using Armadillo linear algebra
+- **Scikit-learn compatible**: Follows scikit-learn API conventions
+- **Flexible model complexity**: Control tree depth and piecewise linear behavior
+- **Feature importance**: Built-in feature importance calculation
+- **Bootstrap aggregation**: RaFFLE uses bootstrap sampling for robust predictions
+
+## Parameters
+
+### RaFFLE
+
+- `n_estimators`: Number of trees in the forest (default: 10)
+- `max_depth`: Maximum depth of each tree (default: 12)
+- `min_sample_fit`: Minimum samples needed to fit any node (default: 10)
+- `min_sample_alpha`: Minimum samples for piecewise nodes (default: 5)
+- `min_sample_leaf`: Minimum samples in each leaf (default: 5)
+- `random_state`: Random seed for reproducibility (default: 42)
+- `n_features_tree`: Fraction of features to consider per tree (default: 1.0)
+- `n_features_node`: Fraction of features to consider per node (default: 1.0)
+- `alpha`: Controls piecewise linear complexity (default: 1)
+
+### PILOT
+
+- `df_settings`: Degrees of freedom for different node types
+- `max_depth`: Maximum tree depth
+- `max_features`: Maximum features to consider
+- `min_sample_fit`: Minimum samples for fitting
+- `min_sample_alpha`: Minimum samples for piecewise splits
+- `min_sample_leaf`: Minimum samples per leaf
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Citation
+
+If you use this package in your research, please cite:
+
+```bibtex
+@article{raymaekers2024pilot,
+  title={Fast linear model trees by PILOT},
+  author={Raymaekers, J. and Rousseeuw, P.J. and Verdonck, T. and Yao, R.},
+  journal={Machine Learning},
+  pages={1--50},
+  year={2024},
+  doi={10.1007/s10994-024-06590-3}
+}
 ```
 
-Next you can run benchmark by running the [benchmark.py](benchmark.py) script:
-```bash
-uv run python benchmark.py
-```
+## Contributing
 
-Results will be stored in the `Output` folder.
+Contributions are welcome! Please see the [GitHub repository](https://github.com/STAN-UAntwerp/fast-model-trees) for more information.
 
-The plots from the paper are created with the [paperplots.py](paperplots.py) script. You can create all plots by running:
+## Support
 
-```bash
-uv run python paperplots.py --all
-```
-
-### Local Modifications
-
-The `CMakeLists.txt` file might need to be modified locally to set the correct paths for your system's dependencies. To prevent these local changes from being committed to the repository, you can tell Git to assume that the file hasn't changed.
-
-To do this, run the following command:
-
-```
-git update-index --assume-unchanged CMakeLists.txt
-```
-
-This will prevent your local changes from being tracked. If you later need to pull updates from the remote repository and want to re-apply your local changes, you can reverse this with:
-
-```
-git update-index --no-assume-unchanged CMakeLists.txt
-```
-
-And then, if you want to discard your local changes and get the version from the repository:
-
-```
-git checkout -- CMakeLists.txt
-```
+For issues and questions, please use the [GitHub issue tracker](https://github.com/STAN-UAntwerp/fast-model-trees/issues).
