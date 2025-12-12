@@ -67,7 +67,7 @@ If you need the latest development version or want to contribute:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/fast-model-trees.git
+git clone https://github.com/STAN-UAntwerp/fast-model-trees.git
 cd fast-model-trees
 
 # Install system dependencies (see above)
@@ -141,7 +141,7 @@ print(f"R² score: {1 - np.mean((y - predictions)**2) / np.var(y):.3f}")
 For development with the scripts and benchmarks:
 
 ```bash
-git clone https://github.com/yourusername/fast-model-trees.git
+git clone https://github.com/STAN-UAntwerp/fast-model-trees.git
 cd fast-model-trees
 
 # Install with development dependencies
@@ -150,5 +150,5 @@ pip install -e ".[dev,benchmarks]"
 
 ## Getting Help
 
-- **Issues**: https://github.com/yourusername/fast-model-trees/issues
-- **Discussions**: https://github.com/yourusername/fast-model-trees/discussions
+- **Issues**: https://github.com/STAN-UAntwerp/fast-model-trees/issues
+- **Discussions**: https://github.com/STAN-UAntwerp/fast-model-trees/discussions
