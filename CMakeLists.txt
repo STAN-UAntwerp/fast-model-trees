@@ -47,7 +47,15 @@ if(NOT carma_FOUND)
             carma
             URL https://github.com/RUrlus/carma/archive/refs/heads/stable.tar.gz
         )
-        FetchContent_MakeAvailable(carma)
+        # carma is header-only: use FetchContent_Populate to download without
+        # calling add_subdirectory(), which would process carma's CMakeLists.txt.
+        # carma's CMakeLists.txt uses cmake_minimum_required(VERSION < 3.5),
+        # which CMake 4.x no longer supports.
+        FetchContent_GetProperties(carma)
+        if(NOT carma_POPULATED)
+            FetchContent_Populate(carma)
+        endif()
+        set(CARMA_INCLUDE_DIR ${carma_SOURCE_DIR}/include)
         set(carma_FOUND TRUE)
     endif()
 endif()
