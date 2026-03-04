@@ -13,8 +13,9 @@ project(pilot_wrapper LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find Python
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+# Find Python (Development.Module is sufficient for extension modules;
+# Development.Embed is not available in manylinux containers)
+find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 
 # Find pybind11
 find_package(pybind11 CONFIG REQUIRED)
