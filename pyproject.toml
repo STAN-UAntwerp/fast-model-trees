@@ -75,7 +75,7 @@ wheel.packages = ["pilot"]
 build.verbose = true
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-*"
+build = "cp31*"  # covers Python 3.10–3.19 (no annual updates needed)
 skip = ["*-win32", "*-musllinux_*", "pp*"]
 
 [tool.cibuildwheel.linux]
