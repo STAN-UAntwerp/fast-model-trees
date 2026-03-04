@@ -43,7 +43,7 @@ jobs:
             f.write(content)
 
     - name: Install cibuildwheel
-      run: pip install cibuildwheel==2.19.2
+      run: pip install cibuildwheel==3.3.1
 
     - name: Build wheels
       run: python -m cibuildwheel --output-dir wheelhouse
