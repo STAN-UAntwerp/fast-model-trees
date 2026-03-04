@@ -69,7 +69,7 @@ cmake.version = ">=3.12"
 cmake.source-dir = "."
 # Use Ninja generator on all platforms - avoids NMake issues on Windows
 # (scikit-build-core installs cmake + ninja as Python packages automatically)
-cmake.generator = "Ninja"
+cmake.args = ["-GNinja"]
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["pilot"]
 build.verbose = true
@@ -95,7 +95,7 @@ archs = ["x86_64"]
 
 [tool.cibuildwheel.macos]
 before-all = "brew install armadillo"
-archs = ["x86_64", "arm64"]
+archs = ["arm64"]
 
 [tool.cibuildwheel.windows]
 # vcpkg is pre-installed on GitHub Actions Windows runners.
