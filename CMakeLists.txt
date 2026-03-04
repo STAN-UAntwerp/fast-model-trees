@@ -15,7 +15,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find Python (Development.Module is sufficient for extension modules;
 # Development.Embed is not available in manylinux containers)
-find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
+# NumPy is required by carma's headers
+find_package(Python3 COMPONENTS Interpreter Development.Module NumPy REQUIRED)
 
 # Find pybind11
 find_package(pybind11 CONFIG REQUIRED)
@@ -71,7 +72,10 @@ target_link_libraries(cpilot PRIVATE
 )
 
 # Include directories
-target_include_directories(cpilot PRIVATE ${ARMADILLO_INCLUDE_DIRS})
+target_include_directories(cpilot PRIVATE
+    ${ARMADILLO_INCLUDE_DIRS}
+    ${Python3_NumPy_INCLUDE_DIRS}   # required by carma's headers
+)
 
 # Link carma if found via find_package
 if(TARGET carma::carma)

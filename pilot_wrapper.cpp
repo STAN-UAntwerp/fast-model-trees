@@ -1,7 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+#include <carma>       // carma must be included before armadillo
 #include <armadillo>
-#include <carma>
 #include "tree.h"
 
 namespace py = pybind11;
