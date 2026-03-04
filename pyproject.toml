@@ -65,12 +65,40 @@ Repository = "https://github.com/STAN-UAntwerp/fast-model-trees"
 Issues = "https://github.com/STAN-UAntwerp/fast-model-trees/issues"
 
 [tool.scikit-build]
-# CMake version requirement
 cmake.version = ">=3.12"
-# Directory where CMakeLists.txt is located
 cmake.source-dir = "."
-# Build settings
+# Use Ninja generator on all platforms - avoids NMake issues on Windows
+# (scikit-build-core installs cmake + ninja as Python packages automatically)
+cmake.generator = "Ninja"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["pilot"]
-# Enable verbose output for debugging
 build.verbose = true
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-*"
+skip = ["*-win32", "*-musllinux_*", "pp*"]
+
+[tool.cibuildwheel.linux]
+# Install Armadillo + BLAS/LAPACK from EPEL, fall back to building Armadillo from source
+before-all = """
+yum install -y epel-release || true
+yum install -y blas-devel lapack-devel || true
+yum install -y armadillo-devel || (
+    cd /tmp &&
+    curl -fsSL "https://sourceforge.net/projects/arma/files/armadillo-12.6.7.tar.xz/download" -o armadillo.tar.xz &&
+    tar xf armadillo.tar.xz &&
+    cmake -S armadillo-12.6.7 -B armadillo-build -DCMAKE_INSTALL_PREFIX=/usr/local &&
+    cmake --build armadillo-build --target install
+)
+"""
+archs = ["x86_64"]
+
+[tool.cibuildwheel.macos]
+before-all = "brew install armadillo"
+archs = ["x86_64", "arm64"]
+
+[tool.cibuildwheel.windows]
+# vcpkg is pre-installed on GitHub Actions Windows runners.
+# CMakeLists.txt auto-detects VCPKG_INSTALLATION_ROOT to set the toolchain file.
+before-all = "vcpkg install armadillo:x64-windows"
+archs = ["AMD64"]
