@@ -67,9 +67,6 @@ Issues = "https://github.com/STAN-UAntwerp/fast-model-trees/issues"
 [tool.scikit-build]
 cmake.version = ">=3.12"
 cmake.source-dir = "."
-# Use Ninja generator on all platforms - avoids NMake issues on Windows
-# (scikit-build-core installs cmake + ninja as Python packages automatically)
-cmake.args = ["-GNinja"]
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["pilot"]
 build.verbose = true
@@ -79,6 +76,8 @@ build = "cp31*"  # covers Python 3.10–3.19 (no annual updates needed)
 skip = ["*-win32", "*-musllinux_*", "pp*"]
 
 [tool.cibuildwheel.linux]
+# Use Ninja generator on Linux for faster builds (scikit-build-core reads CMAKE_ARGS)
+environment = {SKBUILD_CMAKE_ARGS = "-GNinja"}
 # Install Armadillo + BLAS/LAPACK from EPEL, fall back to building Armadillo from source
 before-all = """
 yum install -y epel-release || true
@@ -99,7 +98,7 @@ archs = ["x86_64"]
 # matches the dylibs, satisfying delocate's compatibility check.
 before-all = "brew install armadillo"
 archs = ["arm64"]
-environment = {MACOSX_DEPLOYMENT_TARGET = "15.0"}
+environment = {MACOSX_DEPLOYMENT_TARGET = "15.0", SKBUILD_CMAKE_ARGS = "-GNinja"}
 
 [tool.cibuildwheel.windows]
 # vcpkg is pre-installed on GitHub Actions Windows runners.
