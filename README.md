@@ -67,27 +67,22 @@ importances = model.feature_importances_
 ### Using PILOT (Single Tree)
 
 ```python
-from pilot import PILOT, DEFAULT_DF_SETTINGS
+from pilot import PILOT
 import numpy as np
 
 # Create sample data
 X = np.random.randn(1000, 10)
 y = X[:, 0] + 0.5 * X[:, 1] ** 2 + np.random.randn(1000) * 0.1
 
-# Train PILOT model
-model = PILOT(
-    df_settings=list(DEFAULT_DF_SETTINGS.values()),
-    max_depth=5,
-    max_features=X.shape[1]
-)
-
-# Categorical features (0 = numerical, 1 = categorical)
-categorical = np.zeros(X.shape[1], dtype=int)
-
-model.train(X, y, categorical)
+# Train PILOT model — all parameters have sensible defaults
+model = PILOT(max_depth=5)
+model.train(X, y)  # categorical defaults to all-numerical
 
 # Make predictions
 predictions = model.predict(X)
+
+# Inspect the tree structure
+print(model.tree_summary())
 ```
 
 ## Key Features
@@ -114,12 +109,14 @@ predictions = model.predict(X)
 
 ### PILOT
 
-- `df_settings`: Degrees of freedom for different node types
-- `max_depth`: Maximum tree depth
-- `max_features`: Maximum features to consider
-- `min_sample_fit`: Minimum samples for fitting
-- `min_sample_alpha`: Minimum samples for piecewise splits
-- `min_sample_leaf`: Minimum samples per leaf
+- `df_settings`: Degrees of freedom for node types `[con, lin, pcon, blin, plin, pconc]`. Defaults to `[1, 2, 5, 5, 7, 5]`. Set a value to `-1` to disable that node type.
+- `max_depth`: Maximum split depth (default: 20)
+- `max_model_depth`: Maximum total depth including linear model nodes (default: 100)
+- `max_features`: Features considered per split; `None` (default) uses all features
+- `min_sample_fit`: Minimum samples to fit any node (default: 5)
+- `min_sample_alpha`: Minimum samples for piecewise nodes (default: 5)
+- `min_sample_leaf`: Minimum samples per leaf (default: 5)
+- `rel_tolerance`: Minimum relative RSS improvement to keep growing (default: 0.01)
 
 ## License
 

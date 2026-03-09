@@ -1,0 +1,61 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # ── Linux ────────────────────────────────────────────────────────────
+      - name: Install native dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libarmadillo-dev libopenblas-dev liblapack-dev ninja-build
+
+      # ── macOS ────────────────────────────────────────────────────────────
+      - name: Install native dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install armadillo ninja
+
+      - name: Set MACOSX_DEPLOYMENT_TARGET (macOS)
+        if: runner.os == 'macOS'
+        run: echo "MACOSX_DEPLOYMENT_TARGET=15.0" >> "$GITHUB_ENV"
+
+      # ── Windows ──────────────────────────────────────────────────────────
+      - name: Install native dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install armadillo:x64-windows
+
+      # ── Build & install ──────────────────────────────────────────────────
+      - name: Build and install package (Linux/macOS)
+        if: runner.os != 'Windows'
+        env:
+          SKBUILD_CMAKE_ARGS: "-GNinja"
+        run: pip install -e ".[dev]" -v
+
+      - name: Build and install package (Windows)
+        if: runner.os == 'Windows'
+        run: pip install -e ".[dev]" -v
+
+      # ── Tests ────────────────────────────────────────────────────────────
+      - name: Run tests
+        run: pytest tests/ -v --tb=short

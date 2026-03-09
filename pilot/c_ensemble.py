@@ -2,12 +2,179 @@ import numpy as np
 import pandas as pd
 import multiprocessing as mp
 from sklearn.base import BaseEstimator
-from .cpilot import PILOT
+from .cpilot import PILOT as _CRawPILOT
 from .constants import DEFAULT_DF_SETTINGS
 from functools import partial
 
 
-class PILOTWrapper(PILOT):
+class PILOT:
+    """Single PILOT tree with a user-friendly Python API.
+
+    Parameters
+    ----------
+    df_settings : list of float, optional
+        Degrees of freedom for each node type: [con, lin, pcon, blin, plin, pconc].
+        Defaults to ``list(DEFAULT_DF_SETTINGS.values())`` = [1, 2, 5, 5, 7, 5].
+        Set a value to -1 to disable that node type entirely.
+    max_depth : int, optional
+        Maximum split depth (excluding linear model nodes). Default: 20.
+    max_model_depth : int, optional
+        Maximum total depth including linear model nodes. Default: 100.
+    max_features : int or None, optional
+        Number of features to consider at each split.
+        ``None`` (default) means use all features, resolved at ``train()`` time.
+    min_sample_leaf : int, optional
+        Minimum samples required in each leaf node. Default: 5.
+    min_sample_alpha : int, optional
+        Minimum samples required to fit a piecewise node. Default: 5.
+    min_sample_fit : int, optional
+        Minimum samples required to fit any node. Default: 5.
+    max_pivot : int or None, optional
+        Maximum pivots per feature for approximate splits. ``None`` (default)
+        disables approximation. Note: approximation cannot be used with the
+        blin node type (i.e. when ``df_settings[3] >= 0``).
+    rel_tolerance : float, optional
+        Minimum relative RSS improvement required to continue growing. Default: 0.01.
+    precision_scale : float, optional
+        Numerical precision scale. Default: 1e-10.
+    """
+
+    def __init__(
+        self,
+        df_settings=None,
+        max_depth=20,
+        max_model_depth=100,
+        max_features=None,
+        min_sample_leaf=5,
+        min_sample_alpha=5,
+        min_sample_fit=5,
+        max_pivot=None,
+        rel_tolerance=0.01,
+        precision_scale=1e-10,
+    ):
+        if df_settings is None:
+            df_settings = list(DEFAULT_DF_SETTINGS.values())
+        self.df_settings = list(df_settings)
+        self.max_depth = max_depth
+        self.max_model_depth = max_model_depth
+        self.max_features = max_features
+        self.min_sample_leaf = min_sample_leaf
+        self.min_sample_alpha = min_sample_alpha
+        self.min_sample_fit = min_sample_fit
+        self.max_pivot = max_pivot
+        self.rel_tolerance = rel_tolerance
+        self.precision_scale = precision_scale
+        self._tree = None
+
+    def train(self, X, y, categorical=None):
+        """Fit the PILOT tree.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature matrix. Categorical features must be label-encoded.
+        y : array-like of shape (n_samples,)
+            Target values.
+        categorical : array-like of int of shape (n_features,), optional
+            Binary indicator per feature: 1 = categorical, 0 = numerical.
+            Defaults to all-numerical.
+
+        Returns
+        -------
+        self
+        """
+        X = np.array(X, dtype=float)
+        y = np.array(y, dtype=float).flatten()
+        n_features = X.shape[1]
+        max_features = self.max_features if self.max_features is not None else n_features
+
+        if categorical is None:
+            categorical = np.zeros(n_features, dtype=np.uint32)
+        else:
+            categorical = np.array(categorical, dtype=np.uint32)
+
+        self._tree = _CRawPILOT(
+            self.df_settings,
+            self.min_sample_leaf,
+            self.min_sample_alpha,
+            self.min_sample_fit,
+            self.max_depth,
+            self.max_model_depth,
+            max_features,
+            0 if self.max_pivot is None else self.max_pivot,
+            self.rel_tolerance,
+            self.precision_scale,
+        )
+        self._tree.train(X, y, categorical)
+        return self
+
+    def predict(self, X):
+        """Return predictions for X.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples,)
+        """
+        if self._tree is None:
+            raise ValueError("Model must be trained before predicting. Call train() first.")
+        return self._tree.predict(np.array(X, dtype=float))
+
+    def tree_summary(self, feature_names=None):
+        """Return a DataFrame describing each node in the fitted tree.
+
+        Parameters
+        ----------
+        feature_names : list of str, optional
+            Column names of the training data. When provided, a ``feature_name``
+            column is added to the returned DataFrame.
+
+        Returns
+        -------
+        pd.DataFrame
+        """
+        if self._tree is None:
+            raise ValueError("Model must be trained before calling tree_summary(). Call train() first.")
+        df = pd.DataFrame(
+            self._tree.print(),
+            columns=[
+                "depth",
+                "model_depth",
+                "node_id",
+                "node_type",
+                "feature_index",
+                "split_value",
+                "intercept_left",
+                "slope_left",
+                "intercept_right",
+                "slope_right",
+                "rss_reduction",
+            ],
+        )
+        df["node_type"] = df["node_type"].map(
+            {0: "con", 1: "lin", 2: "pcon", 3: "blin", 4: "plin", 5: "pconc"}
+        )
+        if feature_names is not None:
+            feature_names = np.array(feature_names)
+            df["feature_name"] = df["feature_index"].map(dict(enumerate(feature_names)))
+        return df
+
+    @property
+    def feature_importances_(self):
+        """Normalized RSS reduction per feature (sums to 1.0)."""
+        if self._tree is None:
+            raise ValueError(
+                "Model must be trained before accessing feature_importances_. Call train() first."
+            )
+        raw = self._tree.feature_importances()
+        total = raw.sum()
+        return raw / total if total > 0 else raw
+
+
+class PILOTWrapper(_CRawPILOT):
     def __init__(
         self,
         feature_idx: list[int] | np.ndarray,
