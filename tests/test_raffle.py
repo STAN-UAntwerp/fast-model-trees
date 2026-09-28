@@ -63,3 +63,46 @@ class TestRaFFLEBasic:
         model = RaFFLE(n_estimators=3, n_features_tree="sqrt", n_features_node="sqrt", random_state=5)
         model.fit(X, y)
         assert model.predict(X).shape == (len(y),)
+
+
+class TestConFullSearch:
+    """The node-level model search is extended to all features when con is
+    optimal on the random feature subset (con_full_search=True, default)."""
+
+    @pytest.fixture
+    def sparse_signal_data(self):
+        rng = np.random.default_rng(1)
+        X = rng.standard_normal((800, 10))
+        y = 2 * X[:, 0] + 0.2 * rng.standard_normal(800)
+        return X, y
+
+    def test_identical_when_all_features_used(self, simple_data):
+        X, y = simple_data
+        kw = dict(n_estimators=5, max_depth=5, random_state=0, n_features_node=1.0)
+        m_on = RaFFLE(con_full_search=True, **kw)
+        m_on.fit(X, y)
+        m_off = RaFFLE(con_full_search=False, **kw)
+        m_off.fit(X, y)
+        np.testing.assert_array_equal(m_on.predict(X), m_off.predict(X))
+        assert m_on.con_search_stats_ == {"con_on_subset": 0, "con_overruled": 0}
+
+    def test_disabled_never_overrules(self, sparse_signal_data):
+        X, y = sparse_signal_data
+        m = RaFFLE(n_estimators=5, max_depth=5, random_state=0,
+                   n_features_node=0.1, con_full_search=False)
+        m.fit(X, y)
+        assert m.con_search_stats_["con_overruled"] == 0
+
+    def test_extended_search_recovers_signal(self, sparse_signal_data):
+        X, y = sparse_signal_data
+        kw = dict(n_estimators=10, max_depth=5, random_state=0, n_features_node=0.1)
+        m_on = RaFFLE(con_full_search=True, **kw)
+        m_on.fit(X, y)
+        m_off = RaFFLE(con_full_search=False, **kw)
+        m_off.fit(X, y)
+        mse_on = np.mean((y - m_on.predict(X)) ** 2)
+        mse_off = np.mean((y - m_off.predict(X)) ** 2)
+        assert m_on.con_search_stats_["con_overruled"] > 0
+        assert mse_on < mse_off
+        # the informative feature dominates the importances
+        assert np.argmax(m_on.feature_importances_) == 0

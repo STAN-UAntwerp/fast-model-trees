@@ -106,6 +106,7 @@ print(model.tree_summary())
 - `n_features_tree`: Fraction of features to consider per tree (default: 1.0)
 - `n_features_node`: Fraction of features to consider per node (default: 1.0)
 - `alpha`: Controls piecewise linear complexity (default: 1)
+- `con_full_search`: If a node's best model on its random feature subset is the constant (con) model, extend the model search to all features of the tree and only make the node a leaf if con remains optimal (default: True). Only has an effect when `n_features_node < n_features_tree`. Set to False to reproduce versions <= 0.1.1.
 
 ### PILOT
 

@@ -17,7 +17,7 @@ from sklearn.preprocessing import PowerTransformer
 from ucimlrepo import fetch_ucirepo
 from pmlb import fetch_data
 
-from pilot import CPILOT
+from pilot.cpilot import PILOT as CPILOT
 from pilot.c_ensemble import RandomForestCPilot
 
 

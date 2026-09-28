@@ -17,12 +17,45 @@ MODELMAP = {
 }
 DRAFFLE = "CPF - df alpha = 0.5, no blin - max_depth = 20 - max_node_features = 1.0 - n_estimators = 100"
 
+# Reruns of the RaFFLE (CPF) configurations with max_node_features < 1 after the change to the
+# con rule (con_full_search=True, branch con-extended-search). Configurations that use all
+# features in every node (max_node_features = 1.0, which includes dRaFFLE) are unaffected by
+# that change, since the extended search is only triggered when a strict subset of the
+# features is considered in a node. If the rerun results exist, they replace the CPF rows
+# with max_node_features < 1 of the corresponding original experiment.
+CPF_RERUNS = {
+    "cpilot_forest_benchmark_v11": "cpf_v11_con_full_search",
+    "benchmark_power_transform_v2": "cpf_power_transform_v2_con_full_search",
+}
+
+
+def read_results(experiment: str) -> pd.DataFrame:
+    """Read the results of an experiment, substituting rerun CPF results where available."""
+    df = pd.read_csv(outputfolder / experiment / "results.csv")
+    rerun = CPF_RERUNS.get(experiment)
+    if rerun is not None and (outputfolder / rerun / "results.csv").exists():
+        new = pd.read_csv(outputfolder / rerun / "results.csv")
+        new = new[new["model"].str.startswith("CPF") & (new["max_features"] < 1)]
+        replaced = df["model"].str.startswith("CPF") & (df["max_features"] < 1)
+        # sanity check: the rerun should cover exactly the replaced (dataset, fold, model) cells
+        key = ["id", "fold", "model"]
+        old_keys = set(map(tuple, df.loc[replaced, key].astype(str).values))
+        new_keys = set(map(tuple, new[key].astype(str).values))
+        if old_keys != new_keys:
+            print(
+                f"WARNING: rerun {rerun} does not match {experiment}: "
+                f"{len(old_keys - new_keys)} cells missing, {len(new_keys - old_keys)} extra"
+            )
+        print(f"Using rerun {rerun} for {replaced.sum()} CPF rows of {experiment}")
+        df = pd.concat([df.loc[~replaced], new], ignore_index=True)
+    return df
+
 
 def load_basetable():
     # Load main results (RF, CPF, XGB, old CART/PILOT)
     basetable = pd.concat(
         [
-            pd.read_csv(outputfolder / "cpilot_forest_benchmark_v11" / "results.csv"),
+            read_results("cpilot_forest_benchmark_v11"),
             pd.read_csv(
                 outputfolder
                 / "cpilot_forest_benchmark_v11_linear_models3"
@@ -73,7 +106,7 @@ def load_fit_duration_table():
     # Load main results (RF, CPF, XGB, old CART/PILOT)
     basetable = pd.concat(
         [
-            pd.read_csv(outputfolder / "cpilot_forest_benchmark_v11" / "results.csv"),
+            read_results("cpilot_forest_benchmark_v11"),
             pd.read_csv(
                 outputfolder
                 / "cpilot_forest_benchmark_v11_linear_models3"
@@ -120,7 +153,7 @@ def load_fit_duration_table():
 def get_transformation_table():
     original_results = pd.concat(
         [
-            pd.read_csv(outputfolder / "cpilot_forest_benchmark_v11/results.csv"),
+            read_results("cpilot_forest_benchmark_v11"),
             pd.read_csv(
                 outputfolder / "cpilot_forest_benchmark_v11_linear_models3/results.csv"
             ),
@@ -128,7 +161,7 @@ def get_transformation_table():
         axis=0,
     )
 
-    new_results = pd.read_csv(outputfolder / "benchmark_power_transform_v2/results.csv")
+    new_results = read_results("benchmark_power_transform_v2")
 
     original_results = (
         original_results.groupby(["id", "model"])["r2"].mean().reset_index()

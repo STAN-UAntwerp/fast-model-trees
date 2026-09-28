@@ -55,7 +55,23 @@ df_setting_no_blin["blin"] = -1
     multiple=True,
     help="Models to run (cart, pilot, rf, cpf, xgb, ridge, lasso). If not specified, runs all models.",
 )
-def run_benchmark(experiment_name, models):
+@click.option(
+    "--node_features",
+    "-nf",
+    multiple=True,
+    type=float,
+    default=(0.7, 1.0),
+    show_default=True,
+    help="Values of max_node_features (share of features per node) in the RaFFLE (cpf) grid.",
+)
+@click.option(
+    "--power_transform/--no_power_transform",
+    default=True,
+    show_default=True,
+    help="Apply a Yeo-Johnson power transform to the numerical features "
+    "(on for benchmark_power_transform_v2, off for cpilot_forest_benchmark_v11).",
+)
+def run_benchmark(experiment_name, models, node_features, power_transform):
     experiment_folder = OUTPUTFOLDER / experiment_name
     experiment_folder.mkdir(exist_ok=True)
     experiment_file = experiment_folder / "results.csv"
@@ -69,6 +85,8 @@ def run_benchmark(experiment_name, models):
         models = [m.lower() for m in models]
 
     print_with_timestamp(f"Running benchmark for models: {', '.join(models)}")
+    print_with_timestamp(f"RaFFLE max_node_features grid: {list(node_features)}")
+    print_with_timestamp(f"Power transform on numerical features: {power_transform}")
 
     np.random.seed(42)
     cv = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -111,7 +129,7 @@ def run_benchmark(experiment_name, models):
             train_dataset = dataset.subset(train)
             test_dataset = dataset.subset(test)
 
-            transformers = fit_transformers(train_dataset)
+            transformers = fit_transformers(train_dataset) if power_transform else {}
 
             for col, transformer in transformers.items():
                 train_dataset.apply_transformer(col, transformer)
@@ -213,7 +231,7 @@ def run_benchmark(experiment_name, models):
                             ("df alpha = 0.5, no blin", 0.5, df_setting_alpha5_no_blin),
                         ],
                         [6, 20],
-                        [0.7, 1.0],
+                        list(node_features),
                         [100],
                     )
                 ):

@@ -64,7 +64,8 @@ public:
         const arma::uword& maxFeatures,
         const arma::uword& approx,
         const double &rel_tolerance,
-        const double& precScale);
+        const double& precScale,
+        const bool& conFullSearch = true);
   // for forests, should still include:
   // const arma::uword& Id, const arma::uword mtry
   // etc.
@@ -78,6 +79,7 @@ public:
   arma::mat print() const;
   arma::vec getResiduals() const;
   arma::vec getFeatureImportance() const;
+  arma::uvec getConSearchStats() const;
   
 protected:
   // protected methods
@@ -89,7 +91,8 @@ protected:
   bestSplitOut findBestSplit(arma::uvec & obsIds, // observations currently in this node
                              const arma::mat & X, // matrix of predictors
                              const arma::umat& Xrank,
-                             const arma::uvec & catIds);
+                             const arma::uvec & catIds,
+                             const arma::uvec & featuresToConsider); // candidate features for this search
   void printNode(node* nd, arma::mat& tr) const;
   bool stopGrowing(node* nd) const; // const as it will not change anything to the PILOT object
   
@@ -106,6 +109,8 @@ protected:
   arma::uword approx;
   double rel_tolerance;
   double precScale;
+  bool conFullSearch; // if true, a node is only made a CON leaf if CON is optimal over *all* features,
+                      // not only over the random subset of maxFeatures features drawn in that node
   double lowerBound;
   double upperBound;
  
@@ -113,6 +118,8 @@ protected:
   arma::vec res; // contains the residuals
   arma::uvec nbNodesPerModelDepth; // count number of existing nodes per model depth
   arma::vec featureImportance; // RSS reduction per feature (total across all splits)
+  arma::uword nbConOnSubset;      // number of nodes where CON was optimal on the random feature subset
+  arma::uword nbConOverruled;     // ... of which the extended search over all features selected a non-CON model
 };
 
 #endif

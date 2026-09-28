@@ -37,7 +37,8 @@ public:
             unsigned int maxFeatures,
             unsigned int approx,
             double rel_tolerance,
-            double precScale)
+            double precScale,
+            bool conFullSearch)
         : pilot(numpy_to_vec(dfs),
                 min_sample_leaf,
                 min_sample_alpha,
@@ -47,7 +48,8 @@ public:
                 maxFeatures,
                 approx,
                 rel_tolerance,
-                precScale) {}
+                precScale,
+                conFullSearch) {}
 
     void train(const py::array_t<double>& X,
                const py::array_t<double>& y,
@@ -72,6 +74,11 @@ public:
         return vec_to_numpy(importance);
     }
 
+    py::tuple con_search_stats() const {
+        arma::uvec stats = pilot.getConSearchStats();
+        return py::make_tuple((unsigned long long)stats(0), (unsigned long long)stats(1));
+    }
+
 private:
     PILOT pilot;
 };
@@ -87,9 +94,22 @@ PYBIND11_MODULE(cpilot, m) {
                       unsigned int, //maxFeatures
                       unsigned int, //approx
                       double, //rel_tolerance
-                      double>()) //precScale
+                      double, //precScale
+                      bool>(), //conFullSearch
+             py::arg("dfs"),
+             py::arg("min_sample_leaf"),
+             py::arg("min_sample_alpha"),
+             py::arg("min_sample_fit"),
+             py::arg("max_depth"),
+             py::arg("max_model_depth"),
+             py::arg("max_features"),
+             py::arg("approx"),
+             py::arg("rel_tolerance"),
+             py::arg("precision_scale"),
+             py::arg("con_full_search") = true)
         .def("train", &PyPILOT::train)
         .def("predict", &PyPILOT::predict)
         .def("print", &PyPILOT::print)
-        .def("feature_importances", &PyPILOT::feature_importances);
+        .def("feature_importances", &PyPILOT::feature_importances)
+        .def("con_search_stats", &PyPILOT::con_search_stats);
 }

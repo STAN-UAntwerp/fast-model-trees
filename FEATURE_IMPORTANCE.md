@@ -16,6 +16,14 @@ Feature importance extraction has been implemented for both individual PILOT tre
    featureImportance(newSplit.best_feature) += rss_reduction;
    ```
 
+   Every node in which a non-constant model (lin, pcon, blin, plin, pconc) is fitted contributes the
+   decrease in residual sum of squares of that model, relative to the residuals entering the node, to the
+   feature used by the model. Constant (con) nodes contribute nothing. Since a lin node passes its
+   residuals on to the same set of cases, a feature can collect several contributions within one
+   region. If a lin fit is discarded because its relative improvement is below `rel_tolerance`
+   (the node then becomes a con leaf), its contribution is removed again (fixed in 0.2.0; before,
+   it was erroneously kept).
+
 2. **Per-Tree Normalization (Python)**: Each tree's raw RSS reductions are normalized to sum to 1.0:
    ```python
    raw_importance = super().feature_importances()

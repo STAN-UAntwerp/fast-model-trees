@@ -37,6 +37,13 @@ class PILOT:
         Minimum relative RSS improvement required to continue growing. Default: 0.01.
     precision_scale : float, optional
         Numerical precision scale. Default: 1e-10.
+    con_full_search : bool, optional
+        Only relevant when ``max_features`` is smaller than the number of features.
+        If True (default), a node in which the constant (con) model is optimal on the
+        random subset of ``max_features`` features is only turned into a leaf if con is
+        also optimal over all features; otherwise the best non-constant model over all
+        features is fitted and the recursion continues. If False, the node becomes a
+        leaf as soon as con is optimal on the random subset (behaviour of versions <= 0.1.1).
     """
 
     def __init__(
@@ -51,6 +58,7 @@ class PILOT:
         max_pivot=None,
         rel_tolerance=0.01,
         precision_scale=1e-10,
+        con_full_search=True,
     ):
         if df_settings is None:
             df_settings = list(DEFAULT_DF_SETTINGS.values())
@@ -64,6 +72,7 @@ class PILOT:
         self.max_pivot = max_pivot
         self.rel_tolerance = rel_tolerance
         self.precision_scale = precision_scale
+        self.con_full_search = con_full_search
         self._tree = None
 
     def train(self, X, y, categorical=None):
@@ -104,6 +113,7 @@ class PILOT:
             0 if self.max_pivot is None else self.max_pivot,
             self.rel_tolerance,
             self.precision_scale,
+            self.con_full_search,
         )
         self._tree.train(X, y, categorical)
         return self
@@ -188,6 +198,7 @@ class PILOTWrapper(_CRawPILOT):
         max_pivot=None,  # None means no approximation, otherwise interpreted as max pivots per feature
         rel_tolerance=0.01,
         precision_scale=1e-10,
+        con_full_search=True,
     ):
         if max_features == -1:
             raise ValueError("max_features must be set")
@@ -207,6 +218,7 @@ class PILOTWrapper(_CRawPILOT):
             0 if max_pivot is None else max_pivot,
             rel_tolerance,
             precision_scale,
+            con_full_search,
         )
         self.feature_idx = feature_idx
 
@@ -272,6 +284,7 @@ class RaFFLE(BaseEstimator):
         precision_scale: float = 1e-10,
         alpha: float = 1,
         max_pivot: int | None = None,
+        con_full_search: bool = True,
     ):
         """
         Random Forest with PILOT trees as estimators.
@@ -291,6 +304,13 @@ class RaFFLE(BaseEstimator):
         - precision_scale (float): precision scale
         - alpha (float): number between 0 and 1, sets the df to 1 + alpha * [0, 1, 4, 4, 6, 4].
             Ignored if df_settings is not None
+        - max_pivot (int | None): max number of candidate split points per feature (None = all)
+        - con_full_search (bool): only relevant if n_features_node < n_features_tree. If True
+            (default), a node where the constant model (con) is optimal on the random subset of
+            features is only made a leaf if con is also optimal over all features of the tree;
+            otherwise the best non-constant model over all features is fitted and the recursion
+            continues. If False, the node becomes a leaf as soon as con is optimal on the random
+            subset (behaviour of versions <= 0.1.1).
         """
         self.n_estimators = n_estimators
         self.max_depth = max_depth
@@ -310,6 +330,7 @@ class RaFFLE(BaseEstimator):
         self.precision_scale = precision_scale
         self.alpha = alpha
         self.max_pivot = max_pivot
+        self.con_full_search = con_full_search
 
     def fit(self, X, y, categorical_idx=None, n_workers: int = 1):
         """Fit a random forest ensemble of PILOT trees.
@@ -360,6 +381,7 @@ class RaFFLE(BaseEstimator):
                 max_pivot=self.max_pivot,
                 rel_tolerance=self.rel_tolerance,
                 precision_scale=self.precision_scale,
+                con_full_search=self.con_full_search,
             )
             for _ in range(self.n_estimators)
         ]
@@ -393,6 +415,18 @@ class RaFFLE(BaseEstimator):
         if individual:
             return predictions
         return predictions.mean(axis=1)
+
+    @property
+    def con_search_stats_(self) -> dict:
+        """Diagnostics of the extended model search in con nodes, summed over all trees.
+
+        Returns a dict with
+        - "con_on_subset": number of nodes in which con was optimal on the random feature subset
+        - "con_overruled": number of those nodes in which a non-constant model was selected
+          after extending the search to all features (always 0 if con_full_search=False)
+        """
+        stats = np.array([e.con_search_stats() for e in self.estimators], dtype=int)
+        return {"con_on_subset": int(stats[:, 0].sum()), "con_overruled": int(stats[:, 1].sum())}
 
     @property
     def feature_importances_(self):

@@ -12,7 +12,8 @@ PILOT::PILOT(const arma::vec &dfs,
              const arma::uword &maxFeatures,
              const arma::uword &approx,
              const double &rel_tolerance,
-             const double &precScale) : dfs(dfs),
+             const double &precScale,
+             const bool &conFullSearch) : dfs(dfs),
                                         min_sample_leaf(min_sample_leaf),
                                         min_sample_alpha(min_sample_alpha),
                                         min_sample_fit(min_sample_fit),
@@ -21,7 +22,8 @@ PILOT::PILOT(const arma::vec &dfs,
                                         maxFeatures(maxFeatures),
                                         approx(approx),
                                         rel_tolerance(rel_tolerance),
-                                        precScale(precScale)
+                                        precScale(precScale),
+                                        conFullSearch(conFullSearch)
 {
   // if we want, we can do an additional input check here
 
@@ -77,6 +79,8 @@ void PILOT::train(const arma::mat &X,
 
   // initialize feature importance
   featureImportance = arma::zeros<arma::vec>(X.n_cols);
+  nbConOnSubset = 0;
+  nbConOverruled = 0;
 
   PILOT::growTree(root.get(), y, X, Xrank, catIds);
 }
@@ -89,6 +93,13 @@ arma::vec PILOT::getResiduals() const
 arma::vec PILOT::getFeatureImportance() const
 {
   return (featureImportance);
+}
+
+arma::uvec PILOT::getConSearchStats() const
+{
+  // [number of nodes in which CON was optimal on the random feature subset,
+  //  number of those nodes in which the extended search selected a non-CON model]
+  return arma::uvec({nbConOnSubset, nbConOverruled});
 }
 
 arma::mat PILOT::print() const
@@ -198,10 +209,42 @@ void PILOT::growTree(node *nd,
     // Calculate RSS before split
     double rss_before = arma::sum(arma::square(res(nd->obsIds)));
 
+    // draw the random subset of candidate features for this node
+    arma::uvec featuresToConsider = arma::randperm(X.n_cols, maxFeatures);
+
     bestSplitOut newSplit = findBestSplit(nd->obsIds,
                                           X,
                                           Xrank,
-                                          catIds);
+                                          catIds,
+                                          featuresToConsider);
+
+    // If CON is optimal on the random subset, extend the model selection to all
+    // features before deciding that this node is a leaf. The node only becomes a
+    // CON leaf if CON remains optimal over all features; otherwise the best
+    // non-constant model (over all features) is fitted and the recursion continues.
+    // Since CON already beats every model on the subset, it suffices to search
+    // the complement of the subset (findBestSplit always includes CON as benchmark).
+    // When maxFeatures == X.n_cols this block is never entered, so results are
+    // identical to the original algorithm in that case (the RNG stream is unchanged).
+    if (newSplit.best_type == 0 && maxFeatures < X.n_cols)
+    {
+      nbConOnSubset++;
+      if (conFullSearch)
+      {
+        arma::uvec inSubset(X.n_cols, arma::fill::zeros);
+        inSubset(featuresToConsider).ones();
+        arma::uvec remainingFeatures = arma::find(inSubset == 0);
+        newSplit = findBestSplit(nd->obsIds,
+                                 X,
+                                 Xrank,
+                                 catIds,
+                                 remainingFeatures);
+        if (newSplit.best_type != 0)
+        {
+          nbConOverruled++;
+        }
+      }
+    }
 
     nd->rss = newSplit.best_rss;
     nd->splitVal = newSplit.best_splitVal; // value of that feature at splitpoint
@@ -252,6 +295,8 @@ void PILOT::growTree(node *nd,
 
       if ((rss_old - rss_new) / rss_old < rel_tolerance)
       {
+        // the lin model is discarded: undo its contribution to the feature importance
+        featureImportance(newSplit.best_feature) -= nd->rss_reduction;
         nd->intL = arma::mean(res(nd->obsIds));
         nd->slopeL = arma::datum::nan;
         nd->splitVal = arma::datum::nan;
@@ -385,7 +430,8 @@ bestSplitOut PILOT::findBestSplit(
     arma::uvec &obsIds, // observations currently in this node
     const arma::mat &X, // matrix of predictors
     const arma::umat &Xrank,
-    const arma::uvec &catIds)
+    const arma::uvec &catIds,
+    const arma::uvec &featuresToConsider) // candidate features (CON is always included as benchmark)
 {
 
   //   Remarks:
@@ -412,7 +458,6 @@ bestSplitOut PILOT::findBestSplit(
   arma::uvec ind_local_c; // An array of the indices of the best categorical variable x(obsIds) with levels in pivot_c
   ind_local_c.reset();
 
-  const arma::uword d = X.n_cols;
   const double n = (double)obsIds.n_elem; // double since we use it in many double calculations
   const double logn = std::log(n);
   // first compute con as benchmark
@@ -471,8 +516,6 @@ bestSplitOut PILOT::findBestSplit(
   {
     xorder.set_size(X.n_rows);
   }
-
-  arma::uvec featuresToConsider = arma::randperm(d, maxFeatures);
 
   for (arma::uword j : featuresToConsider)
   { // iterate over features
