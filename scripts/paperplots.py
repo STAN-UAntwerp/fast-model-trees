@@ -36,17 +36,23 @@ def read_results(experiment: str) -> pd.DataFrame:
     if rerun is not None and (outputfolder / rerun / "results.csv").exists():
         new = pd.read_csv(outputfolder / rerun / "results.csv")
         new = new[new["model"].str.startswith("CPF") & (new["max_features"] < 1)]
-        replaced = df["model"].str.startswith("CPF") & (df["max_features"] < 1)
-        # sanity check: the rerun should cover exactly the replaced (dataset, fold, model) cells
+        rerun_cells = df["model"].str.startswith("CPF") & (df["max_features"] < 1)
+        # replace only the (dataset, fold, model) cells that are present in the rerun; cells that
+        # could not be rerun (e.g. datasets no longer available) keep their original results
         key = ["id", "fold", "model"]
-        old_keys = set(map(tuple, df.loc[replaced, key].astype(str).values))
         new_keys = set(map(tuple, new[key].astype(str).values))
-        if old_keys != new_keys:
-            print(
-                f"WARNING: rerun {rerun} does not match {experiment}: "
-                f"{len(old_keys - new_keys)} cells missing, {len(new_keys - old_keys)} extra"
-            )
+        df_keys = pd.Series(list(map(tuple, df[key].astype(str).values)), index=df.index)
+        replaced = rerun_cells & df_keys.isin(new_keys)
+        kept = rerun_cells & ~replaced
         print(f"Using rerun {rerun} for {replaced.sum()} CPF rows of {experiment}")
+        if kept.any():
+            print(
+                f"  keeping original results for {kept.sum()} rows not in the rerun "
+                f"(datasets: {', '.join(sorted(df.loc[kept, 'name'].astype(str).unique()))})"
+            )
+        extra = len(new_keys - set(df_keys[rerun_cells]))
+        if extra:
+            print(f"  WARNING: {extra} rerun cells have no counterpart in {experiment}")
         df = pd.concat([df.loc[~replaced], new], ignore_index=True)
     return df
 
@@ -492,7 +498,9 @@ def create_fit_duration_latex_table(fit_duration_table):
     table = table[[col for col in MODELORDER if col in table.columns]]
 
     # Format values to 3 decimal places
-    table = table.map(lambda x: f"{x:.3f}" if pd.notna(x) else "-")
+    fmt = lambda x: f"{x:.3f}" if pd.notna(x) else "-"
+    # DataFrame.map only exists in pandas >= 2.1 (applymap before)
+    table = table.map(fmt) if hasattr(table, "map") else table.applymap(fmt)
 
     # Generate LaTeX
     latex_str = table.to_latex(
@@ -1447,7 +1455,7 @@ def main(
 
 
 if __name__ == "__main__":
-    figurefolder.mkdir(exist_ok=True)
+    figurefolder.mkdir(parents=True, exist_ok=True)
     basetable = load_basetable()
     reltable = get_relative_table(basetable)
     fit_duration_table = load_fit_duration_table()

@@ -73,7 +73,7 @@ df_setting_no_blin["blin"] = -1
 )
 def run_benchmark(experiment_name, models, node_features, power_transform):
     experiment_folder = OUTPUTFOLDER / experiment_name
-    experiment_folder.mkdir(exist_ok=True)
+    experiment_folder.mkdir(parents=True, exist_ok=True)
     experiment_file = experiment_folder / "results.csv"
     print_with_timestamp(f"Results will be stored in {experiment_file}")
 

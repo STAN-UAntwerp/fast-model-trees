@@ -43,7 +43,7 @@ df_setting_no_blin["blin"] = -1
 @click.option("--experiment_name", "-e", required=True, help="Name of the experiment")
 def run_benchmark(experiment_name):
     experiment_folder = OUTPUTFOLDER / experiment_name
-    experiment_folder.mkdir(exist_ok=True)
+    experiment_folder.mkdir(parents=True, exist_ok=True)
     experiment_file = experiment_folder / "results.csv"
     print(f"Results will be stored in {experiment_file}")
     np.random.seed(42)

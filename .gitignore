@@ -1,5 +1,7 @@
 Data/*
 Output/**
+scripts/Output/*
+scripts/Data/*
 !Output/**/
 Output/profile_results
 Output/archive
@@ -13,3 +15,4 @@ pilot/*.so
 screenlog.*
 benchmark_logs.txt
 .DS_Store
+firebase-debug.log
