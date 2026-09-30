@@ -126,6 +126,10 @@ class PILOT:
     def tree_summary(self, feature_names=None):
         """Return a DataFrame describing each node in the fitted tree.
 
+        The tree is listed in pre-order: a node is followed by its left subtree and
+        then its right subtree. Nodes are identified by ``node_id``; together with
+        ``parent_node_id`` this is enough to reconstruct the tree.
+
         Parameters
         ----------
         feature_names : list of str, optional
@@ -135,28 +139,64 @@ class PILOT:
         Returns
         -------
         pd.DataFrame
+            One row per node, with columns:
+
+            depth
+                Number of splits (pcon/blin/plin/pconc) above the node. lin nodes
+                do not increase the depth. This is what ``max_depth`` limits.
+            model_depth
+                Number of nodes above the node, lin nodes included (root = 0).
+                This is what ``max_model_depth`` limits.
+            node_id
+                Identifier of the node, unique within the tree. It is the string
+                ``"<model_depth>_<k>"``, with ``k`` the index of the node among
+                the nodes with the same ``model_depth`` (e.g. ``"2_3"``); the
+                root is ``"0_0"``.
+            parent_node_id
+                ``node_id`` of the parent. None for the root. A lin node has a
+                single child; a split node has two, of which the left child is
+                listed first (and has the smaller index ``k``).
+            node_type
+                Model fitted in the node: ``con`` (constant, always a leaf),
+                ``lin`` (linear model on all observations, no split), ``pcon``
+                (piecewise constant), ``blin`` (broken linear, continuous at the
+                split), ``plin`` (piecewise linear) or ``pconc`` (piecewise
+                constant on a categorical feature).
+            feature_index
+                Index of the feature used by the node's model. NaN for con nodes.
+            split_value
+                Split point for pcon/blin/plin: observations with
+                ``x <= split_value`` go to the left child, the others to the right.
+                NaN for con, lin and pconc nodes.
+            pivot_values
+                For pconc nodes, sorted array of the levels of the categorical
+                feature that go to the left child; all other levels go to the
+                right. None for all other node types.
+            intercept_left, slope_left
+                Coefficients of the model for the observations going left, which
+                contribute ``intercept_left + slope_left * x`` to the prediction.
+                For lin nodes this is the model for all observations; for con
+                nodes ``intercept_left`` is the constant. The slope is 0 for
+                pcon and NaN for con and pconc (no slope term).
+            intercept_right, slope_right
+                Same, for the observations going right. NaN for con and lin nodes.
+            rss_reduction
+                Reduction in residual sum of squares obtained by the node's model
+                (the basis of ``feature_importances_``).
+            feature_name
+                Name of ``feature_index``; only present if ``feature_names`` is given.
+
+        Notes
+        -----
+        A prediction is the sum of the contributions of all nodes on the path from
+        the root to a con leaf. During prediction, ``x`` is first clipped to the
+        range of the feature seen in that node during training and the running sum
+        is clipped to the range of the training response; these ranges are not part
+        of the summary.
         """
         if self._tree is None:
             raise ValueError("Model must be trained before calling tree_summary(). Call train() first.")
-        df = pd.DataFrame(
-            self._tree.print(),
-            columns=[
-                "depth",
-                "model_depth",
-                "node_id",
-                "node_type",
-                "feature_index",
-                "split_value",
-                "intercept_left",
-                "slope_left",
-                "intercept_right",
-                "slope_right",
-                "rss_reduction",
-            ],
-        )
-        df["node_type"] = df["node_type"].map(
-            {0: "con", 1: "lin", 2: "pcon", 3: "blin", 4: "plin", 5: "pconc"}
-        )
+        df = _tree_summary_frame(self._tree)
         if feature_names is not None:
             feature_names = np.array(feature_names)
             df["feature_name"] = df["feature_index"].map(dict(enumerate(feature_names)))
@@ -214,26 +254,15 @@ class PILOTWrapper(_CRawPILOT):
         return super().predict(X[:, self.feature_idx])
 
     def tree_summary(self, feature_names: list | None = None) -> pd.DataFrame:
-        df = pd.DataFrame(
-            self.print(),
-            columns=[
-                "depth",
-                "model_depth",
-                "node_id",
-                "node_type",
-                "feature_index",
-                "split_value",
-                "intercept_left",
-                "slope_left",
-                "intercept_right",
-                "slope_right",
-                "rss_reduction",
-            ],
-        )
+        """Return a DataFrame describing each node in the fitted tree.
 
-        df["node_type"] = df["node_type"].map(
-            {0: "con", 1: "lin", 2: "pcon", 3: "blin", 4: "plin", 5: "pconc"}
-        )
+        See :meth:`PILOT.tree_summary` for the meaning of the columns. Note that
+        ``feature_index`` refers to the position within ``self.feature_idx`` (the
+        features sampled for this tree); ``feature_name`` is mapped back to the
+        original features.
+        """
+        df = _tree_summary_frame(self)
+
 
         if feature_names is not None:
             feature_names = np.array(feature_names)[self.feature_idx]
@@ -445,6 +474,59 @@ class RaFFLE(BaseEstimator):
         if total > 0:
             return avg_importance / total
         return avg_importance
+
+
+def _tree_summary_frame(tree: _CRawPILOT) -> pd.DataFrame:
+    """Build the tree summary of a fitted C++ tree (see ``PILOT.tree_summary``)."""
+    df = pd.DataFrame(
+        tree.print(),
+        columns=[
+            "depth",
+            "model_depth",
+            "node_id",
+            "node_type",
+            "feature_index",
+            "split_value",
+            "intercept_left",
+            "slope_left",
+            "intercept_right",
+            "slope_right",
+            "rss_reduction",
+            "parent_node_id",
+        ],
+    )
+    df["node_type"] = df["node_type"].map(
+        {0: "con", 1: "lin", 2: "pcon", 3: "blin", 4: "plin", 5: "pconc"}
+    )
+    is_pconc = df["node_type"] == "pconc"
+    # the C++ node ids are only unique within a model depth: prefix them with the model depth
+    model_depth = df["model_depth"].astype(int)
+    is_root = df["parent_node_id"].isna()
+    parent_node_id = (model_depth - 1).astype(str) + "_" + df["parent_node_id"].fillna(0).astype(int).astype(str)
+    df["node_id"] = model_depth.astype(str) + "_" + df["node_id"].astype(int).astype(str)
+    df["parent_node_id"] = parent_node_id.astype(object).where(~is_root, None)
+    df["pivot_values"] = pd.Series(
+        [p if pconc else None for p, pconc in zip(tree.pivots(), is_pconc)],
+        index=df.index,
+        dtype=object,
+    )
+    return df[
+        [
+            "depth",
+            "model_depth",
+            "node_id",
+            "parent_node_id",
+            "node_type",
+            "feature_index",
+            "split_value",
+            "pivot_values",
+            "intercept_left",
+            "slope_left",
+            "intercept_right",
+            "slope_right",
+            "rss_reduction",
+        ]
+    ]
 
 
 def _fit_single_estimator(estimator, X: np.ndarray, y: np.ndarray, categorical_idx: np.ndarray):

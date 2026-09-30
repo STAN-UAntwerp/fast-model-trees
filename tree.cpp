@@ -106,19 +106,54 @@ arma::mat PILOT::print() const
   // 9th column: int right
   // 10th column: slope right
   // 11th column: rss reduction
+  // 12th column: nodeId of the parent node (nan for the root).
+  //              nodeId is only unique within a modelDepth; the parent lives at modelDepth - 1
   // first the left node row is added, then right node
   // could also add modelID which increments for lin nodes as well.
 
-  arma::mat tr(0, 11);
+  arma::mat tr(0, 12);
   if (root != nullptr)
   { // check if tree has been constructed
     node *nd = root.get();
-    printNode(nd, tr);
+    printNode(nd, arma::datum::nan, tr);
   }
   return tr;
 }
 
-void PILOT::printNode(node *nd, arma::mat &tr) const
+std::vector<arma::vec> PILOT::getPivots() const
+{
+  // pivot_c (levels going to the left child) of every node, in the same order as the rows of print().
+  // Empty for all nodes that are not pconc.
+  std::vector<arma::vec> pivots;
+  if (root != nullptr)
+  {
+    collectPivots(root.get(), pivots);
+  }
+  return pivots;
+}
+
+void PILOT::collectPivots(node *nd, std::vector<arma::vec> &pivots) const
+{
+  if (nd->type == 5)
+  {
+    pivots.push_back(nd->pivot_c);
+  }
+  else
+  {
+    pivots.push_back(arma::vec());
+  }
+  if (nd->type == 1)
+  { // lin node
+    collectPivots(nd->left.get(), pivots);
+  }
+  else if (nd->type > 1)
+  { // pcon/blin/plin/pconc --> split
+    collectPivots(nd->left.get(), pivots);
+    collectPivots(nd->right.get(), pivots);
+  }
+}
+
+void PILOT::printNode(node *nd, double parentId, arma::mat &tr) const
 {
 
   tr.insert_rows(tr.n_rows, 1);
@@ -132,7 +167,8 @@ void PILOT::printNode(node *nd, arma::mat &tr) const
                       (double)nd->slopeL,
                       (double)nd->intR,
                       (double)nd->slopeR,
-                      (double)nd->rss_reduction};
+                      (double)nd->rss_reduction,
+                      parentId};
   if (nd->type == 0)
   {
     vec(4) = arma::datum::nan;
@@ -140,12 +176,12 @@ void PILOT::printNode(node *nd, arma::mat &tr) const
   tr.row(tr.n_rows - 1) = vec;
   if (nd->type == 1)
   { // lin node
-    printNode(nd->left.get(), tr);
+    printNode(nd->left.get(), (double)nd->nodeId, tr);
   }
   else if (nd->type > 1)
   { // pcon/blin/plin/pconc --> split
-    printNode(nd->left.get(), tr);
-    printNode(nd->right.get(), tr);
+    printNode(nd->left.get(), (double)nd->nodeId, tr);
+    printNode(nd->right.get(), (double)nd->nodeId, tr);
   }
 }
 
@@ -938,6 +974,10 @@ bestSplitOut PILOT::findBestSplit(
           {
             best_feature = j;
             best_type = 5; // node type 5 for pconc
+            // no split value or slopes for pconc: reset values left by an earlier candidate
+            best_splitVal = arma::datum::nan;
+            best_slopeL = arma::datum::nan;
+            best_slopeR = arma::datum::nan;
             best_rangeL = xs.front();
             best_rangeR = xs.back();
             best_intL = sumL / nL;

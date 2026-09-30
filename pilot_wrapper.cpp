@@ -67,6 +67,14 @@ public:
         return carma::mat_to_arr(tree);
     }
 
+    py::list pivots() const {
+        py::list out;
+        for (const arma::vec& pivot : pilot.getPivots()) {
+            out.append(vec_to_numpy(pivot));
+        }
+        return out;
+    }
+
     py::array_t<double> feature_importances() const {
         arma::vec importance = pilot.getFeatureImportance();
         return vec_to_numpy(importance);
@@ -91,5 +99,6 @@ PYBIND11_MODULE(cpilot, m) {
         .def("train", &PyPILOT::train)
         .def("predict", &PyPILOT::predict)
         .def("print", &PyPILOT::print)
+        .def("pivots", &PyPILOT::pivots)
         .def("feature_importances", &PyPILOT::feature_importances);
 }

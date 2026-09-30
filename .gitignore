@@ -1,3 +1,5 @@
+scripts/Data/*
+scripts/Output/*
 Data/*
 Output/**
 !Output/**/

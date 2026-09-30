@@ -16,6 +16,23 @@ def simple_data():
     return X, y
 
 
+@pytest.fixture
+def categorical_data():
+    rng = np.random.default_rng(0)
+    n = 600
+    X = np.column_stack(
+        [rng.standard_normal(n), rng.integers(0, 6, n).astype(float), rng.standard_normal(n)]
+    )
+    level_effect = np.array([3.0, -2.0, 0.5, 3.0, -2.0, 1.0])
+    y = (
+        level_effect[X[:, 1].astype(int)]
+        + X[:, 0]
+        + np.where(X[:, 2] > 0, 2 * X[:, 2], 0)
+        + rng.standard_normal(n) * 0.1
+    )
+    return X, y, [0, 1, 0]
+
+
 # ---------------------------------------------------------------------------
 # Constructor / API
 # ---------------------------------------------------------------------------
@@ -148,6 +165,72 @@ class TestTreeSummary:
         model.train(X, y)
         df = model.tree_summary(feature_names=names)
         assert "feature_name" in df.columns
+
+    def test_tree_summary_pconc_pivot_values(self, categorical_data):
+        X, y, categorical = categorical_data
+        model = PILOT(max_depth=4)
+        model.train(X, y, categorical=categorical)
+        df = model.tree_summary()
+        is_pconc = df["node_type"] == "pconc"
+        assert is_pconc.any()
+        levels = np.unique(X[:, 1])
+        for pivots in df.loc[is_pconc, "pivot_values"]:
+            assert 0 < len(pivots) < len(levels)
+            assert np.isin(pivots, levels).all()
+            assert (np.diff(pivots) > 0).all()
+        assert df.loc[~is_pconc, "pivot_values"].isna().all()
+        assert df.loc[is_pconc, ["split_value", "slope_left", "slope_right"]].isna().all().all()
+
+    def test_tree_summary_parent_node_id(self, categorical_data):
+        X, y, categorical = categorical_data
+        model = PILOT(max_depth=4)
+        model.train(X, y, categorical=categorical)
+        df = model.tree_summary()
+        assert df["node_id"].is_unique
+        assert df["parent_node_id"].isna().sum() == 1
+        assert df["parent_node_id"].iloc[0] is None
+        assert df["parent_node_id"].iloc[1:].isin(df["node_id"]).all()
+
+        nodes = df.set_index("node_id")
+        n_children = {"con": 0, "lin": 1, "pcon": 2, "blin": 2, "plin": 2, "pconc": 2}
+        children = df.iloc[1:].groupby("parent_node_id").size()
+        for node_id, row in nodes.iterrows():
+            assert children.get(node_id, 0) == n_children[row["node_type"]]
+        parent_depth = df["parent_node_id"].iloc[1:].map(nodes["model_depth"])
+        assert (parent_depth.to_numpy() == df["model_depth"].iloc[1:].to_numpy() - 1).all()
+
+    def test_tree_summary_reconstructs_predictions(self, categorical_data):
+        """The summary alone should be enough to rebuild the tree and predict with it."""
+        X, y, categorical = categorical_data
+        model = PILOT(max_depth=4)
+        model.train(X, y, categorical=categorical)
+        df = model.tree_summary()
+
+        children = {}
+        for _, row in df.iloc[1:].iterrows():  # left child is listed before right child
+            children.setdefault(row["parent_node_id"], []).append(row)
+
+        def predict_one(x):
+            node, pred = df.iloc[0], 0.0
+            while node["node_type"] != "con":
+                kids = children[node["node_id"]]
+                xj = x[int(node["feature_index"])]
+                if node["node_type"] == "lin":
+                    go_left = True
+                elif node["node_type"] == "pconc":
+                    go_left = xj in node["pivot_values"]
+                else:
+                    go_left = xj <= node["split_value"]
+                side = "left" if go_left else "right"
+                slope = node[f"slope_{side}"]
+                pred += node[f"intercept_{side}"] + (0.0 if np.isnan(slope) else slope * xj)
+                pred = np.clip(pred, y.min(), y.max())
+                node = kids[0 if go_left else 1]
+            return np.clip(pred + node["intercept_left"], y.min(), y.max())
+
+        expected = model.predict(X)
+        actual = np.array([predict_one(x) for x in X])
+        np.testing.assert_allclose(actual, expected, rtol=1e-8, atol=1e-8)
 
 
 # ---------------------------------------------------------------------------
