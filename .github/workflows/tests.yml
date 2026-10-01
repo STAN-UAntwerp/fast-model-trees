@@ -52,10 +52,20 @@ jobs:
           SKBUILD_CMAKE_ARGS: "-GNinja"
         run: pip install -e ".[dev]" -v
 
-      - name: Build and install package (Windows)
+      # An editable install cannot load the vcpkg DLLs (armadillo, OpenBLAS): Python does not
+      # search PATH for the dependencies of extension modules. Test the wheel as it is published
+      # instead, with the DLLs bundled by delvewheel (same as repair-wheel-command in pyproject.toml).
+      - name: Build, repair and install wheel (Windows)
         if: runner.os == 'Windows'
-        run: pip install -e ".[dev]" -v
+        shell: bash
+        run: |
+          pip install delvewheel
+          pip wheel . --no-deps -w dist_raw -v
+          delvewheel repair --add-path C:/vcpkg/installed/x64-windows/bin -w dist dist_raw/*.whl
+          pip install "$(ls dist/*.whl)[dev]"
 
       # ── Tests ────────────────────────────────────────────────────────────
+      # importlib mode keeps the repo root off sys.path, so the installed package is imported
+      # rather than the source folder pilot/ (which has no compiled extension on Windows)
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short --import-mode=importlib

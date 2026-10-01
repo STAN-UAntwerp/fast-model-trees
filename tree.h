@@ -5,6 +5,7 @@
 #define ARMA_NO_DEBUG
 #include <armadillo> 
 #include <memory>
+#include <vector>
 
 
 struct bestSplitOut {
@@ -76,6 +77,7 @@ public:
              const arma::uvec& catIds);
   arma::colvec predict(const arma::mat& X) const;
   arma::mat print() const;
+  std::vector<arma::vec> getPivots() const; // pivot_c of every node, in the row order of print()
   arma::vec getResiduals() const;
   arma::vec getFeatureImportance() const;
   
@@ -90,7 +92,8 @@ protected:
                              const arma::mat & X, // matrix of predictors
                              const arma::umat& Xrank,
                              const arma::uvec & catIds);
-  void printNode(node* nd, arma::mat& tr) const;
+  void printNode(node* nd, double parentId, arma::mat& tr) const;
+  void collectPivots(node* nd, std::vector<arma::vec>& pivots) const;
   bool stopGrowing(node* nd) const; // const as it will not change anything to the PILOT object
   
 protected:
