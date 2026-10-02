@@ -93,9 +93,10 @@ yum install -y armadillo-devel || (
 archs = ["x86_64"]
 
 [tool.cibuildwheel.macos]
-# Homebrew on the macos-latest (macOS 15) runner builds for macOS 15.
+# Homebrew on the macos-15 runner (pinned in publish.yml) builds for macOS 15.
 # We set MACOSX_DEPLOYMENT_TARGET=15.0 so the wheel's declared target
 # matches the dylibs, satisfying delocate's compatibility check.
+# Keep both in sync when moving to a newer runner.
 before-all = "brew install armadillo"
 archs = ["arm64"]
 environment = {MACOSX_DEPLOYMENT_TARGET = "15.0", SKBUILD_CMAKE_ARGS = "-GNinja"}
