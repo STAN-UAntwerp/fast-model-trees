@@ -37,7 +37,8 @@ public:
             unsigned int maxFeatures,
             unsigned int approx,
             double rel_tolerance,
-            double precScale)
+            double precScale,
+            std::uint64_t seed)
         : pilot(numpy_to_vec(dfs),
                 min_sample_leaf,
                 min_sample_alpha,
@@ -47,7 +48,8 @@ public:
                 maxFeatures,
                 approx,
                 rel_tolerance,
-                precScale) {}
+                precScale,
+                seed) {}
 
     void train(const py::array_t<double>& X,
                const py::array_t<double>& y,
@@ -95,7 +97,12 @@ PYBIND11_MODULE(cpilot, m) {
                       unsigned int, //maxFeatures
                       unsigned int, //approx
                       double, //rel_tolerance
-                      double>()) //precScale
+                      double, //precScale
+                      std::uint64_t>(), //seed of the feature sampling
+             py::arg("dfs"), py::arg("min_sample_leaf"), py::arg("min_sample_alpha"),
+             py::arg("min_sample_fit"), py::arg("max_depth"), py::arg("max_model_depth"),
+             py::arg("max_features"), py::arg("approx"), py::arg("rel_tolerance"),
+             py::arg("precision_scale"), py::arg("seed") = 0)
         .def("train", &PyPILOT::train)
         .def("predict", &PyPILOT::predict)
         .def("print", &PyPILOT::print)

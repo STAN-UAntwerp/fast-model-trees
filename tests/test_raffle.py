@@ -107,6 +107,35 @@ class TestRaFFLEBasic:
         assert model.predict(X).shape == (len(y),)
 
 
+class TestRaFFLERandomState:
+    def test_reproducible_with_node_feature_sampling(self, simple_data):
+        """random_state also controls the features sampled at each node."""
+        X, y = simple_data
+        kwargs = dict(n_estimators=5, n_features_node=0.5, random_state=1)
+        p1 = RaFFLE(**kwargs).fit(X, y).predict(X)
+        p2 = RaFFLE(**kwargs).fit(X, y).predict(X)
+        np.testing.assert_array_equal(p1, p2)
+
+    def test_different_seeds_differ(self, simple_data):
+        X, y = simple_data
+        p1 = RaFFLE(n_estimators=3, n_features_node=0.5, random_state=1).fit(X, y).predict(X)
+        p2 = RaFFLE(n_estimators=3, n_features_node=0.5, random_state=2).fit(X, y).predict(X)
+        assert not np.array_equal(p1, p2)
+
+    def test_bootstrap_and_tree_features_unchanged(self, simple_data):
+        """Seeding the C++ trees must not change the np.random draws of earlier versions."""
+        X, y = simple_data
+        n_estimators, seed = 4, 7
+        model = RaFFLE(n_estimators=n_estimators, n_features_tree=0.5, random_state=seed).fit(X, y)
+        np.random.seed(seed)
+        n_feat = int(X.shape[1] * 0.5)
+        features = [np.random.choice(np.arange(X.shape[1]), size=n_feat, replace=False) for _ in range(n_estimators)]
+        bootstraps = [np.random.choice(np.arange(len(X)), size=len(X), replace=True) for _ in range(n_estimators)]
+        for est, f, b in zip(model.estimators, features, bootstraps):
+            np.testing.assert_array_equal(est.feature_idx, f)
+            np.testing.assert_array_equal(est.bootstrap_idx, b)
+
+
 class TestRaFFLEBootstrap:
     def test_bootstrap_idx_stored(self, simple_data):
         X, y = simple_data

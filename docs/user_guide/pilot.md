@@ -49,7 +49,9 @@ tree = PILOT(df_settings=[1, 2, 5, -1, 7, 5])
   samples.
 - `rel_tolerance`: a `lin` node must reduce the RSS of its samples by at least this
   fraction; otherwise it is replaced by a `con` leaf.
-- `max_features`: number of features, drawn at random, considered at each node.
+- `max_features`: number of features, drawn at random, considered at each node. Set
+  `random_state` to an integer to make this draw reproducible; with the default `None`
+  the seed comes from NumPy's global generator, so `np.random.seed` works too.
 - `max_pivot`: limit the number of candidate split points per feature to speed up
   training on large data. Cannot be combined with `blin` nodes, so disable them with
   `df_settings[3] = -1`.
