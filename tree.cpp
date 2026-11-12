@@ -12,7 +12,8 @@ PILOT::PILOT(const arma::vec &dfs,
              const arma::uword &maxFeatures,
              const arma::uword &approx,
              const double &rel_tolerance,
-             const double &precScale) : dfs(dfs),
+             const double &precScale,
+             const std::uint64_t &seed) : dfs(dfs),
                                         min_sample_leaf(min_sample_leaf),
                                         min_sample_alpha(min_sample_alpha),
                                         min_sample_fit(min_sample_fit),
@@ -21,7 +22,9 @@ PILOT::PILOT(const arma::vec &dfs,
                                         maxFeatures(maxFeatures),
                                         approx(approx),
                                         rel_tolerance(rel_tolerance),
-                                        precScale(precScale)
+                                        precScale(precScale),
+                                        seed(seed),
+                                        rng(seed)
 {
   // if we want, we can do an additional input check here
 
@@ -49,6 +52,9 @@ void PILOT::train(const arma::mat &X,
   {
     throw std::range_error("maxFeatures should not be larger than the number of features");
   }
+
+  // reset the random generator, so that training is reproducible for a given seed
+  rng.seed(seed);
 
   // calculate Xrank
   arma::umat Xrank(X.n_rows, X.n_cols, arma::fill::zeros);
@@ -186,6 +192,19 @@ void PILOT::printNode(node *nd, double parentId, arma::mat &tr) const
     printNode(nd->left.get(), (double)nd->nodeId, tr);
     printNode(nd->right.get(), (double)nd->nodeId, tr);
   }
+}
+
+arma::uvec PILOT::sampleFeatures(arma::uword d)
+{
+  // partial Fisher-Yates shuffle: the first maxFeatures entries are a uniform random subset of 0..d-1.
+  // Uses the tree's own rng (not Armadillo's global generator) so that the seed controls the result.
+  arma::uvec features = arma::regspace<arma::uvec>(0, d - 1);
+  for (arma::uword i = 0; i < maxFeatures; i++)
+  {
+    std::uniform_int_distribution<arma::uword> pick(i, d - 1);
+    std::swap(features(i), features(pick(rng)));
+  }
+  return features.head(maxFeatures);
 }
 
 bool PILOT::stopGrowing(node *nd) const
@@ -511,7 +530,7 @@ bestSplitOut PILOT::findBestSplit(
     xorder.set_size(X.n_rows);
   }
 
-  arma::uvec featuresToConsider = arma::randperm(d, maxFeatures);
+  arma::uvec featuresToConsider = sampleFeatures(d);
 
   for (arma::uword j : featuresToConsider)
   { // iterate over features

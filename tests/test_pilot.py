@@ -141,6 +141,52 @@ class TestTrainPredict:
 
 
 # ---------------------------------------------------------------------------
+# random_state
+# ---------------------------------------------------------------------------
+
+class TestRandomState:
+    """max_features < n_features makes PILOT sample features at every node."""
+
+    @pytest.fixture
+    def wide_data(self):
+        rng = np.random.default_rng(1)
+        X = rng.standard_normal((300, 12))
+        y = X[:, :6] @ np.arange(1, 7) + np.sin(3 * X[:, 6]) + 0.1 * rng.standard_normal(300)
+        return X, y
+
+    def test_same_seed_same_tree(self, wide_data):
+        X, y = wide_data
+        p1 = PILOT(max_features=3, random_state=5).train(X, y).predict(X)
+        p2 = PILOT(max_features=3, random_state=5).train(X, y).predict(X)
+        np.testing.assert_array_equal(p1, p2)
+
+    def test_retrain_is_reproducible(self, wide_data):
+        X, y = wide_data
+        model = PILOT(max_features=3, random_state=5)
+        p1 = model.train(X, y).predict(X)
+        p2 = model.train(X, y).predict(X)
+        np.testing.assert_array_equal(p1, p2)
+
+    def test_different_seeds_differ(self, wide_data):
+        X, y = wide_data
+        preds = [PILOT(max_features=3, random_state=s).train(X, y).predict(X) for s in range(4)]
+        assert any(not np.array_equal(preds[0], p) for p in preds[1:])
+
+    def test_none_follows_numpy_global_seed(self, wide_data):
+        X, y = wide_data
+        np.random.seed(123)
+        p1 = PILOT(max_features=3).train(X, y).predict(X)
+        np.random.seed(123)
+        p2 = PILOT(max_features=3).train(X, y).predict(X)
+        np.testing.assert_array_equal(p1, p2)
+
+    def test_invalid_random_state_raises(self, wide_data):
+        X, y = wide_data
+        with pytest.raises(ValueError, match="random_state"):
+            PILOT(random_state=-1).train(X, y)
+
+
+# ---------------------------------------------------------------------------
 # tree_summary
 # ---------------------------------------------------------------------------
 

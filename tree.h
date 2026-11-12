@@ -4,7 +4,9 @@
 
 #define ARMA_NO_DEBUG
 #include <armadillo> 
+#include <cstdint>
 #include <memory>
+#include <random>
 #include <vector>
 
 
@@ -65,7 +67,8 @@ public:
         const arma::uword& maxFeatures,
         const arma::uword& approx,
         const double &rel_tolerance,
-        const double& precScale);
+        const double& precScale,
+        const std::uint64_t& seed = 0);
   // for forests, should still include:
   // const arma::uword& Id, const arma::uword mtry
   // etc.
@@ -94,6 +97,7 @@ protected:
                              const arma::uvec & catIds);
   void printNode(node* nd, double parentId, arma::mat& tr) const;
   void collectPivots(node* nd, std::vector<arma::vec>& pivots) const;
+  arma::uvec sampleFeatures(arma::uword d); // maxFeatures distinct feature ids out of d, drawn with rng
   bool stopGrowing(node* nd) const; // const as it will not change anything to the PILOT object
   
 protected:
@@ -109,6 +113,8 @@ protected:
   arma::uword approx;
   double rel_tolerance;
   double precScale;
+  std::uint64_t seed; // seed of rng; rng is reset to it at the start of every train()
+  std::mt19937_64 rng; // used to sample the features considered at each node
   double lowerBound;
   double upperBound;
  

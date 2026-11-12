@@ -8,7 +8,9 @@ base learners. Each tree is trained on
   drawn once per tree.
 
 At every node a tree additionally considers a random subset of `n_features_node` of its
-features. The forest predicts the average of its trees.
+features. The forest predicts the average of its trees. `random_state` controls all
+three random draws (bootstrap samples, features per tree, features per node), so two
+fits with the same `random_state` give the same forest.
 
 ```python
 from pilot import RaFFLE

@@ -42,6 +42,12 @@ class PILOT:
         Minimum relative RSS improvement required to continue growing. Default: 0.01.
     precision_scale : float, optional
         Numerical precision scale. Default: 1e-10.
+    random_state : int or None, optional
+        Seed for the random selection of the ``max_features`` features considered
+        at each node. ``None`` (default) draws a seed from NumPy's global random
+        generator at every ``train()`` call, so ``np.random.seed`` also makes
+        training reproducible. Only matters when ``max_features`` is smaller than
+        the number of features (and for ties between features).
     """
 
     def __init__(
@@ -56,6 +62,7 @@ class PILOT:
         max_pivot=None,
         rel_tolerance=0.01,
         precision_scale=1e-10,
+        random_state=None,
     ):
         if df_settings is None:
             df_settings = list(DEFAULT_DF_SETTINGS.values())
@@ -69,6 +76,7 @@ class PILOT:
         self.max_pivot = max_pivot
         self.rel_tolerance = rel_tolerance
         self.precision_scale = precision_scale
+        self.random_state = random_state
         self._tree = None
 
     def train(self, X, y, categorical=None):
@@ -109,6 +117,7 @@ class PILOT:
             0 if self.max_pivot is None else self.max_pivot,
             self.rel_tolerance,
             self.precision_scale,
+            _resolve_seed(self.random_state),
         )
         self._tree.train(X, y, categorical)
         return self
@@ -230,7 +239,8 @@ class PILOTWrapper(_CRawPILOT):
     """A PILOT tree trained on a subset of the features: the trees of a RaFFLE forest.
 
     Takes the same parameters as :class:`PILOT`, plus ``feature_idx``, and
-    ``max_features`` is required. Unlike :class:`PILOT`, :meth:`train` must be given
+    ``max_features`` is required. ``random_state`` is resolved to a seed at
+    construction: with ``None``, a seed is drawn from NumPy's global random generator. Unlike :class:`PILOT`, :meth:`train` must be given
     only the columns in ``feature_idx`` (in that order), while :meth:`predict` takes
     the full feature matrix and selects those columns itself.
 
@@ -256,6 +266,7 @@ class PILOTWrapper(_CRawPILOT):
         max_pivot=None,  # None means no approximation, otherwise interpreted as max pivots per feature
         rel_tolerance=0.01,
         precision_scale=1e-10,
+        random_state=None,
     ):
         if max_features == -1:
             raise ValueError("max_features must be set")
@@ -275,6 +286,7 @@ class PILOTWrapper(_CRawPILOT):
             0 if max_pivot is None else max_pivot,
             rel_tolerance,
             precision_scale,
+            _resolve_seed(random_state),
         )
         self.feature_idx = feature_idx
 
@@ -334,8 +346,10 @@ class RaFFLE(RegressorMixin, BaseEstimator):
         Minimum samples required to fit a piecewise node. Default: 5.
     min_sample_leaf : int, optional
         Minimum samples required in each leaf node. Default: 5.
-    random_state : int, optional
-        Seed used for the bootstrap samples and the feature sampling. Default: 42.
+    random_state : int or None, optional
+        Seed used for the bootstrap samples and the feature sampling, both per
+        tree and per node. ``None`` gives a different forest at every fit.
+        Default: 42.
     n_features_tree : float or "sqrt", optional
         Share of the features each tree is trained on, or ``"sqrt"`` for
         ``int(sqrt(n_features))`` features. Default: 1.0.
@@ -473,6 +487,12 @@ class RaFFLE(RegressorMixin, BaseEstimator):
         self.df_settings_ = [float(v) for v in df_settings]
 
         np.random.seed(self.random_state)
+        # Seeds of the per-node feature sampling in the C++ trees. Drawn from a separate
+        # SeedSequence so that the np.random draws below (tree features, bootstrap samples)
+        # are the same as before these seeds existed.
+        tree_seeds = np.random.SeedSequence(self.random_state).generate_state(
+            self.n_estimators, dtype=np.uint64
+        )
         self.estimators = [
             PILOTWrapper(
                 feature_idx=np.random.choice(
@@ -488,8 +508,9 @@ class RaFFLE(RegressorMixin, BaseEstimator):
                 max_pivot=self.max_pivot,
                 rel_tolerance=self.rel_tolerance,
                 precision_scale=self.precision_scale,
+                random_state=int(seed),
             )
-            for _ in range(self.n_estimators)
+            for seed in tree_seeds
         ]
 
         if n_workers == -1:
@@ -650,6 +671,16 @@ class RaFFLE(RegressorMixin, BaseEstimator):
         if total > 0:
             return avg_importance / total
         return avg_importance
+
+
+def _resolve_seed(random_state: int | None) -> int:
+    """Turn ``random_state`` into a seed for the C++ tree (an unsigned 64-bit integer)."""
+    if random_state is None:
+        return int(np.random.randint(0, np.iinfo(np.int64).max, dtype=np.int64))
+    seed = int(random_state)
+    if not 0 <= seed < 2**64:
+        raise ValueError(f"random_state must be None or an integer in [0, 2**64), got {random_state}")
+    return seed
 
 
 def _tree_summary_frame(tree: _CRawPILOT) -> pd.DataFrame:
