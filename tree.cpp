@@ -108,10 +108,12 @@ arma::mat PILOT::print() const
   // 11th column: rss reduction
   // 12th column: nodeId of the parent node (nan for the root).
   //              nodeId is only unique within a modelDepth; the parent lives at modelDepth - 1
+  // 13th column: number of training observations in the node (with multiplicity, so for a
+  //              bootstrap sample duplicated observations are counted every time they occur)
   // first the left node row is added, then right node
   // could also add modelID which increments for lin nodes as well.
 
-  arma::mat tr(0, 12);
+  arma::mat tr(0, 13);
   if (root != nullptr)
   { // check if tree has been constructed
     node *nd = root.get();
@@ -168,7 +170,8 @@ void PILOT::printNode(node *nd, double parentId, arma::mat &tr) const
                       (double)nd->intR,
                       (double)nd->slopeR,
                       (double)nd->rss_reduction,
-                      parentId};
+                      parentId,
+                      (double)nd->obsIds.n_elem};
   if (nd->type == 0)
   {
     vec(4) = arma::datum::nan;

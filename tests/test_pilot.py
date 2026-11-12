@@ -1,4 +1,6 @@
 """Tests for the PILOT single-tree API."""
+from collections import Counter
+
 import numpy as np
 import pytest
 from pilot import PILOT, DEFAULT_DF_SETTINGS
@@ -231,6 +233,51 @@ class TestTreeSummary:
         expected = model.predict(X)
         actual = np.array([predict_one(x) for x in X])
         np.testing.assert_allclose(actual, expected, rtol=1e-8, atol=1e-8)
+
+
+    def test_tree_summary_n_samples(self, categorical_data):
+        """n_samples counts the training rows that reach each node."""
+        X, y, categorical = categorical_data
+        model = PILOT(max_depth=4)
+        model.train(X, y, categorical=categorical)
+        df = model.tree_summary()
+        assert df["n_samples"].dtype.kind == "i"
+        assert df["n_samples"].iloc[0] == len(X)
+
+        nodes = df.set_index("node_id")
+        child_sum = df.iloc[1:].groupby("parent_node_id")["n_samples"].sum()
+        for node_id, total in child_sum.items():
+            assert total == nodes.loc[node_id, "n_samples"]
+        leaves = df[df["node_type"] == "con"]
+        assert leaves["n_samples"].sum() == len(X)
+        assert (leaves["n_samples"] > 0).all()
+
+    def test_tree_summary_leaf_counts_match_routing(self, categorical_data):
+        """Routing the training data through the tree reproduces the leaf counts."""
+        X, y, categorical = categorical_data
+        model = PILOT(max_depth=4)
+        model.train(X, y, categorical=categorical)
+        df = model.tree_summary()
+        children = {}
+        for _, row in df.iloc[1:].iterrows():
+            children.setdefault(row["parent_node_id"], []).append(row)
+
+        def leaf_of(x):
+            node = df.iloc[0]
+            while node["node_type"] != "con":
+                xj = x[int(node["feature_index"])]
+                if node["node_type"] == "lin":
+                    go_left = True
+                elif node["node_type"] == "pconc":
+                    go_left = xj in node["pivot_values"]
+                else:
+                    go_left = xj <= node["split_value"]
+                node = children[node["node_id"]][0 if go_left else 1]
+            return node["node_id"]
+
+        routed = Counter(leaf_of(x) for x in X)
+        leaves = df[df["node_type"] == "con"].set_index("node_id")["n_samples"]
+        assert routed == leaves.to_dict()
 
 
 # ---------------------------------------------------------------------------
