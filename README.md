@@ -1,5 +1,8 @@
 # fast-model-trees
 
+[![Documentation](https://readthedocs.org/projects/fast-model-trees/badge/?version=latest)](https://fast-model-trees.readthedocs.io/)
+[![PyPI](https://img.shields.io/pypi/v/fast-model-trees)](https://pypi.org/project/fast-model-trees/)
+
 Fast implementation of **PILOT** (PIecewise Linear Organic Trees) and **RaFFLE** (Random Forest Featuring Linear Extensions) algorithms.
 
 ## Overview
@@ -8,6 +11,8 @@ This package provides efficient C++-based implementations of:
 
 - **PILOT**: A linear model tree algorithm that builds piecewise linear models
 - **RaFFLE**: A random forest ensemble method using PILOT trees as base learners
+
+📖 **Documentation: <https://fast-model-trees.readthedocs.io>**: installation, user guide and API reference.
 
 ## Papers
 
@@ -31,11 +36,11 @@ If you need to build from source, you'll need:
 - pybind11
 - carma (C++ Armadillo/NumPy bridge)
 
-See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+See the [installation guide](https://fast-model-trees.readthedocs.io/page/installation.html) for platform-specific instructions.
 
 ### Development
 
-For development setup, running benchmarks, and reproducing paper results, see [DEVELOPMENT.md](DEVELOPMENT.md).
+For development setup, running benchmarks, and reproducing paper results, see [DEVELOPMENT.md](https://github.com/STAN-UAntwerp/fast-model-trees/blob/main/DEVELOPMENT.md).
 
 ## Quick Start
 
@@ -103,6 +108,8 @@ leaf_sizes = summary.loc[summary["node_type"] == "con", ["node_id", "n_samples"]
 - **Tree inspection**: `tree_summary()` lists every node with its model, split and sample count
 
 ## Parameters
+
+The most important parameters are listed below; see the [API reference](https://fast-model-trees.readthedocs.io/page/api.html) for all of them, and the user guides for [PILOT](https://fast-model-trees.readthedocs.io/page/user_guide/pilot.html) and [RaFFLE](https://fast-model-trees.readthedocs.io/page/user_guide/raffle.html) for how they work.
 
 ### RaFFLE
 

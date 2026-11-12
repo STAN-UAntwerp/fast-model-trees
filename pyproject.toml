@@ -60,7 +60,7 @@ benchmarks = [
 
 [project.urls]
 Homepage = "https://github.com/STAN-UAntwerp/fast-model-trees"
-Documentation = "https://github.com/STAN-UAntwerp/fast-model-trees#readme"
+Documentation = "https://fast-model-trees.readthedocs.io"
 Repository = "https://github.com/STAN-UAntwerp/fast-model-trees"
 Issues = "https://github.com/STAN-UAntwerp/fast-model-trees/issues"
 
