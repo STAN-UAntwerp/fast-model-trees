@@ -1,10 +1,15 @@
+from __future__ import annotations
+
+import warnings
+from typing import Callable
+
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.metrics import r2_score
 from .cpilot import PILOT as _CRawPILOT
 from .constants import DEFAULT_DF_SETTINGS
-from functools import partial
 
 
 class PILOT:
@@ -183,6 +188,13 @@ class PILOT:
             rss_reduction
                 Reduction in residual sum of squares obtained by the node's model
                 (the basis of ``feature_importances_``).
+            n_samples
+                Number of training observations that reached the node. For a con
+                leaf this is the number of samples in the leaf. A lin node and its
+                child have the same count; for a split node the counts of the two
+                children add up to the count of the node. In RaFFLE, trees are
+                trained on a bootstrap sample, so an observation drawn several
+                times is counted several times.
             feature_name
                 Name of ``feature_index``; only present if ``feature_names`` is given.
 
@@ -215,6 +227,22 @@ class PILOT:
 
 
 class PILOTWrapper(_CRawPILOT):
+    """A PILOT tree trained on a subset of the features: the trees of a RaFFLE forest.
+
+    Takes the same parameters as :class:`PILOT`, plus ``feature_idx``, and
+    ``max_features`` is required. Unlike :class:`PILOT`, :meth:`train` must be given
+    only the columns in ``feature_idx`` (in that order), while :meth:`predict` takes
+    the full feature matrix and selects those columns itself.
+
+    Attributes
+    ----------
+    feature_idx : np.ndarray
+        Columns of the full feature matrix the tree uses.
+    bootstrap_idx : np.ndarray
+        Only for trees of a fitted :class:`RaFFLE`: rows of the training data in the
+        bootstrap sample the tree was trained on.
+    """
+
     def __init__(
         self,
         feature_idx: list[int] | np.ndarray,
@@ -251,6 +279,7 @@ class PILOTWrapper(_CRawPILOT):
         self.feature_idx = feature_idx
 
     def predict(self, X):
+        """Return predictions for the full feature matrix X."""
         return super().predict(X[:, self.feature_idx])
 
     def tree_summary(self, feature_names: list | None = None) -> pd.DataFrame:
@@ -284,7 +313,81 @@ class PILOTWrapper(_CRawPILOT):
         return raw_importance
 
 
-class RaFFLE(BaseEstimator):
+class RaFFLE(RegressorMixin, BaseEstimator):
+    """Random Forest Featuring Linear Extensions: a random forest of PILOT trees.
+
+    Every tree is a PILOT tree trained on a bootstrap sample of the training data
+    and a random subset of the features. Predictions are the average of the
+    predictions of the trees.
+
+    Parameters
+    ----------
+    n_estimators : int, optional
+        Number of trees in the forest. Default: 10.
+    max_depth : int, optional
+        Maximum split depth of each tree (excluding linear model nodes). Default: 12.
+    max_model_depth : int, optional
+        Maximum total depth of each tree, linear model nodes included. Default: 100.
+    min_sample_fit : int, optional
+        Minimum samples required to fit any node. Default: 10.
+    min_sample_alpha : int, optional
+        Minimum samples required to fit a piecewise node. Default: 5.
+    min_sample_leaf : int, optional
+        Minimum samples required in each leaf node. Default: 5.
+    random_state : int, optional
+        Seed used for the bootstrap samples and the feature sampling. Default: 42.
+    n_features_tree : float or "sqrt", optional
+        Share of the features each tree is trained on, or ``"sqrt"`` for
+        ``int(sqrt(n_features))`` features. Default: 1.0.
+    n_features_node : float or "sqrt", optional
+        Share of the features considered at each node (capped at the number of
+        features of the tree), or ``"sqrt"``. Default: 1.0.
+    df_settings : dict of str to float or list of float, optional
+        Degrees of freedom per node type: a dict with the keys of
+        :data:`pilot.DEFAULT_DF_SETTINGS` in the same order, or a list
+        ``[con, lin, pcon, blin, plin, pconc]``. Overrides ``alpha``.
+    rel_tolerance : float, optional
+        Minimum relative RSS improvement required to continue growing. Default: 0.01.
+    precision_scale : float, optional
+        Numerical precision scale. Default: 1e-10.
+    alpha : float, optional
+        Number between 0 and 1 that scales the complexity penalty of the node
+        types: the degrees of freedom are ``1 + alpha * (DEFAULT_DF_SETTINGS - 1)``,
+        i.e. ``1 + alpha * [0, 1, 4, 4, 6, 4]``. Ignored if ``df_settings`` is given.
+        Default: 1.
+    max_pivot : int or None, optional
+        Maximum pivots per feature for approximate splits. ``None`` (default)
+        disables approximation.
+    oob_score : bool or callable, optional
+        Whether to compute out-of-bag predictions and an out-of-bag score at the
+        end of :meth:`fit`. ``True`` uses the R² score; a callable
+        ``score(y_true, y_pred)`` (e.g. ``sklearn.metrics.mean_squared_error``)
+        is used as the metric instead. Default: False.
+
+    Attributes
+    ----------
+    estimators : list of PILOTWrapper
+        The fitted trees. Each tree has a ``feature_idx`` attribute (the features
+        it was trained on) and a ``bootstrap_idx`` attribute (the rows of the
+        training data in its bootstrap sample).
+    df_settings_ : list of float
+        Degrees of freedom of ``[con, lin, pcon, blin, plin, pconc]`` used by the
+        trees, resolved from ``df_settings`` or ``alpha``.
+    n_samples_fit_ : int
+        Number of rows in the training data.
+    n_features_in_ : int
+        Number of features in the training data.
+    oob_prediction_ : np.ndarray of shape (n_samples,)
+        Out-of-bag prediction for every training row: the average prediction of
+        the trees whose bootstrap sample does not contain that row. NaN for rows
+        that are in the bootstrap sample of every tree. Only set when
+        ``oob_score`` is enabled.
+    oob_score_ : float
+        Score of ``oob_prediction_`` against the training targets, computed on
+        the rows that have an out-of-bag prediction. Only set when ``oob_score``
+        is enabled.
+    """
+
     def __init__(
         self,
         n_estimators: int = 10,
@@ -296,31 +399,13 @@ class RaFFLE(BaseEstimator):
         random_state: int = 42,
         n_features_tree: float | str = 1.0,
         n_features_node: float | str = 1.0,
-        df_settings: dict[str, int] | None = None,
+        df_settings: dict[str, float] | list[float] | None = None,
         rel_tolerance: float = 0.01,
         precision_scale: float = 1e-10,
         alpha: float = 1,
         max_pivot: int | None = None,
+        oob_score: bool | Callable = False,
     ):
-        """
-        Random Forest with PILOT trees as estimators.
-        Args:
-        - n_estimators (int): number of PILOT trees
-        - max_depth (int): max depth to grow each PILOT tree (excl linear nodes)
-        - max_model_depth (int): max depth to grow each PILOT tree (incl linear nodes)
-        - min_sample_fit (int): min samples needed to fit any node
-        - min_sample_alpha (int): min samples needed to fit a piecewise node
-        - min_sample_leaf (int): min samples needed in each leaf node
-        - random_state (int): seed used for bootstrapping and feature sampling
-        - n_features_tree (float): relative share of features to consider on tree level
-        - n_features_node (float): relative share of features to consider on node level
-        - df_settings (Optional[dict]): optionally override the default settings.
-            If not None, alpha is ignored
-        - rel_tolerance (float): relative improvement in RSS needed to continue growing
-        - precision_scale (float): precision scale
-        - alpha (float): number between 0 and 1, sets the df to 1 + alpha * [0, 1, 4, 4, 6, 4].
-            Ignored if df_settings is not None
-        """
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.max_model_depth = max_model_depth
@@ -330,33 +415,39 @@ class RaFFLE(BaseEstimator):
         self.random_state = random_state
         self.n_features_tree = n_features_tree
         self.n_features_node = n_features_node
-        self.df_settings = (
-            list(df_settings.values())
-            if df_settings is not None
-            else (1 + alpha * (np.array(list(DEFAULT_DF_SETTINGS.values())) - 1)).tolist()
-        )
+        self.df_settings = df_settings
         self.rel_tolerance = rel_tolerance
         self.precision_scale = precision_scale
         self.alpha = alpha
         self.max_pivot = max_pivot
+        self.oob_score = oob_score
 
     def fit(self, X, y, categorical_idx=None, n_workers: int = 1):
         """Fit a random forest ensemble of PILOT trees.
 
-        Args:
-            X (pd.DataFrame | np.ndarray): Feature data.
-                Categorical features need to be label encoded.
-            y (pd.Series | np.ndarray): Target values
-            categorical_idx (Iterable[int] | None, optional):
-                (numerical) indices of categorical features.
-                If any index is -1, all features are considered numerical.
-                Defaults to None, i.e. no all features are considered numerical.
-            n_workers (int, optional): > 1 not supported a.t.m.. Defaults to 1.
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature data. Categorical features need to be label encoded.
+        y : array-like of shape (n_samples,)
+            Target values.
+        categorical_idx : array-like of int, optional
+            Column indices of the categorical features. If any index is -1, all
+            features are considered numerical. Defaults to None, i.e. all features
+            are considered numerical.
+        n_workers : int, optional
+            Values other than 1 are not supported at the moment. Default: 1.
+
+        Returns
+        -------
+        self
         """
 
         categorical = np.zeros(X.shape[1], dtype=int)
-        if categorical_idx is not None and not (categorical_idx == -1).any():
-            categorical[categorical_idx] = 1
+        if categorical_idx is not None:
+            categorical_idx = np.asarray(categorical_idx, dtype=int)
+            if not (categorical_idx == -1).any():
+                categorical[categorical_idx] = 1
 
         X = np.array(X)
         y = np.array(y).flatten()
@@ -373,13 +464,21 @@ class RaFFLE(BaseEstimator):
                 else int(X.shape[1] * self.n_features_node)
             ),
         )
+        if self.df_settings is None:
+            df_settings = 1 + self.alpha * (np.array(list(DEFAULT_DF_SETTINGS.values())) - 1)
+        elif isinstance(self.df_settings, dict):
+            df_settings = self.df_settings.values()
+        else:
+            df_settings = self.df_settings
+        self.df_settings_ = [float(v) for v in df_settings]
+
         np.random.seed(self.random_state)
         self.estimators = [
             PILOTWrapper(
                 feature_idx=np.random.choice(
                     np.arange(X.shape[1]), size=n_features_tree, replace=False
                 ),
-                df_settings=self.df_settings,
+                df_settings=self.df_settings_,
                 min_sample_leaf=self.min_sample_leaf,
                 min_sample_alpha=self.min_sample_alpha,
                 min_sample_fit=self.min_sample_fit,
@@ -402,21 +501,43 @@ class RaFFLE(BaseEstimator):
             ]
         else:
             raise NotImplementedError("Parallel processing not available for CPILOT")
-            with mp.Pool(processes=n_workers) as p:
-                self.estimators = p.map(
-                    partial(
-                        _fit_single_estimator,
-                        X=X,
-                        y=y,
-                        categorical_idx=categorical_idx,
-                        n_features=n_features,
-                    ),
-                    self.estimators,
-                )
         # filter failed estimators
         self.estimators = [e for e in self.estimators if e is not None]
+        self.n_samples_fit_ = len(X)
+        self.n_features_in_ = X.shape[1]
+
+        if self.oob_score:
+            self.oob_prediction_ = self.oob_predict(X)
+            has_oob = ~np.isnan(self.oob_prediction_)
+            if not has_oob.any():
+                raise ValueError(
+                    "No training row is out-of-bag for any tree, the OOB score cannot be "
+                    "computed. Increase n_estimators."
+                )
+            if not has_oob.all():
+                warnings.warn(
+                    f"{(~has_oob).sum()} training rows are in the bootstrap sample of every tree "
+                    "and have no OOB prediction; they are left out of oob_score_. "
+                    "Increase n_estimators to avoid this.",
+                    UserWarning,
+                )
+            score = self.oob_score if callable(self.oob_score) else r2_score
+            self.oob_score_ = score(y[has_oob], self.oob_prediction_[has_oob])
+        return self
 
     def predict(self, X, individual: bool = False) -> np.ndarray:
+        """Predict the target for X.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+        individual : bool, optional
+            If True, return the prediction of every tree instead of their average.
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples,), or (n_samples, n_estimators) if ``individual``
+        """
         X = np.array(X)
         predictions = np.concatenate([e.predict(X).reshape(-1, 1) for e in self.estimators], axis=1)
         if individual:
@@ -424,35 +545,90 @@ class RaFFLE(BaseEstimator):
         return predictions.mean(axis=1)
 
     @property
+    def estimators_samples_(self) -> list[np.ndarray]:
+        """Bootstrap indices of every tree, in the order of ``estimators``.
+
+        Each entry holds the row indices of the training data the tree was trained
+        on, drawn with replacement (so it contains duplicates).
+        """
+        if not hasattr(self, "estimators"):
+            raise ValueError("Model must be fitted before accessing estimators_samples_")
+        return [e.bootstrap_idx for e in self.estimators]
+
+    def oob_mask(self) -> np.ndarray:
+        """Boolean matrix telling which training rows are out-of-bag for which tree.
+
+        Returns
+        -------
+        np.ndarray of bool, shape (n_samples, n_estimators)
+            Entry ``(i, j)`` is True if training row ``i`` is not in the bootstrap
+            sample of tree ``j``.
+        """
+        if not hasattr(self, "estimators"):
+            raise ValueError("Model must be fitted before calling oob_mask()")
+        mask = np.ones((self.n_samples_fit_, len(self.estimators)), dtype=bool)
+        for j, idx in enumerate(self.estimators_samples_):
+            mask[idx, j] = False
+        return mask
+
+    def oob_predict(self, X) -> np.ndarray:
+        """Out-of-bag predictions for the training data.
+
+        Every row is predicted by averaging only the trees that did not see it
+        during training. Combine with any metric to get an OOB estimate of the
+        generalization error, e.g.
+        ``mean_squared_error(y[mask], oob[mask])`` with ``mask = ~np.isnan(oob)``.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            The training data passed to :meth:`fit`, with the rows in the same order.
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples,)
+            OOB prediction of each row; NaN for rows that are in the bootstrap
+            sample of every tree.
+        """
+        X = np.array(X)
+        if not hasattr(self, "estimators"):
+            raise ValueError("Model must be fitted before calling oob_predict()")
+        if len(X) != self.n_samples_fit_:
+            raise ValueError(
+                f"X has {len(X)} rows but the model was fitted on {self.n_samples_fit_} rows; "
+                "oob_predict() needs the training data."
+            )
+        mask = self.oob_mask()
+        predictions = np.zeros(len(X))
+        n_trees = mask.sum(axis=1)
+        for j, estimator in enumerate(self.estimators):
+            rows = mask[:, j]
+            if rows.any():
+                predictions[rows] += estimator.predict(X[rows])
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(n_trees > 0, predictions / n_trees, np.nan)
+
+    @property
     def feature_importances_(self):
-        """Compute average feature importance across all trees in the forest.
+        """Average feature importance across all trees in the forest.
 
-        Feature importance is calculated as the normalized RSS reduction per tree,
-        averaged across all trees, then re-normalized. This follows sklearn's approach:
-        1. Each tree's importances are normalized (sum to 1.0)
-        2. Importances are averaged across trees
-        3. Final result is re-normalized (sum to 1.0)
+        Follows scikit-learn's approach:
 
-        Features not selected in a particular tree contribute 0 to that tree's importance.
+        1. each tree's RSS reductions per feature are normalized to sum to 1,
+        2. the normalized importances are averaged across trees,
+        3. the result is re-normalized to sum to 1.
 
-        Returns:
-            np.ndarray: Array of shape (n_features,) with normalized feature importances
-                       summing to 1.0.
+        Features a tree was not trained on contribute 0 to that tree's importance.
+
+        Returns
+        -------
+        np.ndarray of shape (n_features,)
+            Normalized feature importances, summing to 1.
         """
         if not hasattr(self, 'estimators') or len(self.estimators) == 0:
             raise ValueError("Model must be fitted before accessing feature_importances_")
 
-        # Get the number of features from the first estimator
-        n_features_total = len(self.estimators[0].feature_idx) if hasattr(self.estimators[0], 'feature_idx') else 0
-
-        if n_features_total == 0:
-            # Fallback: check from fitted data
-            raise ValueError("Cannot determine number of features")
-
-        # We need to know the total number of features in the original space
-        # This is the max feature index across all trees + 1
-        max_feature_idx = max(max(e.feature_idx) for e in self.estimators)
-        n_features = max_feature_idx + 1
+        n_features = self.n_features_in_
 
         # Initialize total importance array
         total_importance = np.zeros(n_features)
@@ -493,6 +669,7 @@ def _tree_summary_frame(tree: _CRawPILOT) -> pd.DataFrame:
             "slope_right",
             "rss_reduction",
             "parent_node_id",
+            "n_samples",
         ],
     )
     df["node_type"] = df["node_type"].map(
@@ -505,6 +682,7 @@ def _tree_summary_frame(tree: _CRawPILOT) -> pd.DataFrame:
     parent_node_id = (model_depth - 1).astype(str) + "_" + df["parent_node_id"].fillna(0).astype(int).astype(str)
     df["node_id"] = model_depth.astype(str) + "_" + df["node_id"].astype(int).astype(str)
     df["parent_node_id"] = parent_node_id.astype(object).where(~is_root, None)
+    df["n_samples"] = df["n_samples"].astype(int)
     df["pivot_values"] = pd.Series(
         [p if pconc else None for p, pconc in zip(tree.pivots(), is_pconc)],
         index=df.index,
@@ -525,6 +703,7 @@ def _tree_summary_frame(tree: _CRawPILOT) -> pd.DataFrame:
             "intercept_right",
             "slope_right",
             "rss_reduction",
+            "n_samples",
         ]
     ]
 
@@ -537,6 +716,7 @@ def _fit_single_estimator(estimator, X: np.ndarray, y: np.ndarray, categorical_i
 
     try:
         estimator.train(X_bootstrap, y[bootstrap_idx], categorical_idx)
+        estimator.bootstrap_idx = bootstrap_idx
         return estimator
     except ValueError as e:
         print(e)

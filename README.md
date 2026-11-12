@@ -62,6 +62,12 @@ predictions = model.predict(X)
 
 # Get feature importances
 importances = model.feature_importances_
+
+# Out-of-bag estimate of the test R² (set oob_score=True when constructing the model)
+model = RaFFLE(n_estimators=100, max_depth=5, oob_score=True).fit(X, y)
+model.oob_score_
+model.oob_predict(X)        # OOB predictions of the training rows, any metric
+model.estimators_samples_   # bootstrap indices of every tree
 ```
 
 ### Using PILOT (Single Tree)
@@ -81,8 +87,9 @@ model.train(X, y)  # categorical defaults to all-numerical
 # Make predictions
 predictions = model.predict(X)
 
-# Inspect the tree structure
-print(model.tree_summary())
+# Inspect the tree structure (one row per node, incl. the number of training samples)
+summary = model.tree_summary()
+leaf_sizes = summary.loc[summary["node_type"] == "con", ["node_id", "n_samples"]]
 ```
 
 ## Key Features
@@ -92,6 +99,8 @@ print(model.tree_summary())
 - **Flexible model complexity**: Control tree depth and piecewise linear behavior
 - **Feature importance**: Built-in feature importance calculation
 - **Bootstrap aggregation**: RaFFLE uses bootstrap sampling for robust predictions
+- **Out-of-bag estimates**: bootstrap indices are stored per tree, for OOB predictions and scores
+- **Tree inspection**: `tree_summary()` lists every node with its model, split and sample count
 
 ## Parameters
 
@@ -106,6 +115,7 @@ print(model.tree_summary())
 - `n_features_tree`: Fraction of features to consider per tree (default: 1.0)
 - `n_features_node`: Fraction of features to consider per node (default: 1.0)
 - `alpha`: Controls piecewise linear complexity (default: 1)
+- `oob_score`: Compute the out-of-bag score during `fit`: `True` for R², or a metric `f(y_true, y_pred)` (default: False)
 
 ### PILOT
 

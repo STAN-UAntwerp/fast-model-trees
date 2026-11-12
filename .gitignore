@@ -15,3 +15,5 @@ pilot/*.so
 screenlog.*
 benchmark_logs.txt
 .DS_Store
+firebase-debug.log
+docs/_build/
